@@ -192,6 +192,23 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "app.js?v=60" in html
 
 
+def test_theme_persists_in_first_party_cookie() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert 'const themeCookieName = "classcatalog_theme";' in javascript
+    assert "const themeCookieMaxAgeSeconds = 60 * 60 * 24 * 365;" in javascript
+    assert "readCookie(themeCookieName)" in javascript
+    assert "writeCookie(themeCookieName, normalizeTheme(themeId), themeCookieMaxAgeSeconds);" in javascript
+    assert 'window.localStorage.setItem(legacyThemeStorageKey' not in javascript
+    assert 'const cookieName = "classcatalog_theme";' in html
+    assert "SameSite=Lax" in html
+    assert "Path=/" in html
+    assert 'window.location.protocol === "https:"' in html
+    assert 'cookie += "; Secure"' in html
+    assert "themecookie=1" in html
+
+
 def test_header_comparison_tagline_is_removed() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
 

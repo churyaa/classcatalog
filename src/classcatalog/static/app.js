@@ -25,6 +25,162 @@ const state = {
   serviceMessages: {},
 };
 
+const themeCookieName = "classcatalog_theme";
+const themeCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
+const legacyThemeStorageKey = "classcatalog_theme_v1";
+const themeNames = {
+  sdsu: "SDSU Light",
+  "sdsu-dark": "SDSU Dark",
+  "after-dark": "After Dark",
+  "80s-after-dark": "80s after dark",
+  aether: "aether",
+  aurora: "aurora",
+  "blue-dolphin": "blue dolphin",
+  "blueberry-dark": "blueberry dark",
+  bushido: "bushido",
+  catppuccin: "catppuccin",
+  "chaos-theory": "chaos theory",
+  cyberspace: "cyberspace",
+  dark: "dark",
+  "dark-magic-girl": "dark magic girl",
+  dots: "dots",
+  dracula: "dracula",
+  drowning: "drowning",
+  "ez-mode": "ez mode",
+  fire: "fire",
+  fledgling: "fledgling",
+  "future-funk": "future funk",
+  hammerhead: "hammerhead",
+  husqy: "husqy",
+  "iceberg-dark": "iceberg dark",
+  "neon-sunset": "Neon Sunset",
+};
+
+function savedTheme() {
+  const cookieTheme = readCookie(themeCookieName);
+  if (cookieTheme) return cookieTheme;
+
+  // One-time migration for browsers that saved a theme before cookie persistence.
+  try {
+    const legacyTheme = window.localStorage.getItem(legacyThemeStorageKey) || "";
+    if (legacyTheme) {
+      persistTheme(legacyTheme);
+      window.localStorage.removeItem(legacyThemeStorageKey);
+      return legacyTheme;
+    }
+  } catch {
+    // Ignore unavailable legacy storage and fall back to the default theme.
+  }
+  return "sdsu";
+}
+
+function persistTheme(themeId) {
+  writeCookie(themeCookieName, normalizeTheme(themeId), themeCookieMaxAgeSeconds);
+  try {
+    window.localStorage.removeItem(legacyThemeStorageKey);
+  } catch {
+    // Legacy storage cleanup is optional.
+  }
+}
+
+let selectedThemeId = "sdsu";
+
+function normalizeTheme(themeId) {
+  return Object.hasOwn(themeNames, themeId) ? themeId : "sdsu";
+}
+
+function applyTheme(themeId) {
+  document.documentElement.dataset.theme = normalizeTheme(themeId);
+}
+
+function syncThemePicker(themeId) {
+  const selectedTheme = normalizeTheme(themeId);
+
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.setAttribute("aria-checked", String(button.dataset.themeOption === selectedTheme));
+  });
+
+  const toggle = document.querySelector("#theme-picker-toggle");
+  if (toggle) {
+    const name = themeNames[selectedTheme];
+    toggle.setAttribute("aria-label", `Choose theme. Current theme: ${name}`);
+    toggle.title = `Theme: ${name}`;
+  }
+}
+
+function setTheme(themeId, { persist = true } = {}) {
+  selectedThemeId = normalizeTheme(themeId);
+  applyTheme(selectedThemeId);
+  syncThemePicker(selectedThemeId);
+  if (persist) persistTheme(selectedThemeId);
+}
+
+function previewTheme(themeId) {
+  applyTheme(themeId);
+}
+
+function restoreSelectedTheme() {
+  applyTheme(selectedThemeId);
+}
+
+function setupThemePicker() {
+  const picker = document.querySelector("#theme-picker");
+  const toggle = document.querySelector("#theme-picker-toggle");
+  const panel = document.querySelector("#theme-picker-panel");
+  if (!picker || !toggle || !panel) return;
+
+  const closePicker = ({ focusToggle = false } = {}) => {
+    restoreSelectedTheme();
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    if (focusToggle) toggle.focus();
+  };
+
+  const openPicker = () => {
+    panel.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+  };
+
+  setTheme(savedTheme(), { persist: false });
+
+  toggle.addEventListener("click", () => {
+    if (panel.hidden) openPicker();
+    else closePicker();
+  });
+
+  const themeOptions = panel.querySelector(".theme-options");
+  panel.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.addEventListener("pointerenter", () => {
+      previewTheme(button.dataset.themeOption);
+    });
+
+    button.addEventListener("focus", () => {
+      previewTheme(button.dataset.themeOption);
+    });
+
+    button.addEventListener("blur", restoreSelectedTheme);
+
+    button.addEventListener("click", () => {
+      setTheme(button.dataset.themeOption);
+      closePicker({ focusToggle: true });
+    });
+  });
+
+  if (themeOptions) {
+    themeOptions.addEventListener("pointerleave", restoreSelectedTheme);
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (panel.hidden || picker.contains(event.target)) return;
+    closePicker();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || panel.hidden) return;
+    closePicker({ focusToggle: true });
+  });
+}
+
 class ApiError extends Error {
   constructor(message, { status = 0, code = "request_failed", requestId = "" } = {}) {
     super(message);
@@ -672,6 +828,12 @@ function checkedValues(name) {
   return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => input.value);
 }
 
+function dayValues(stateName) {
+  return [...document.querySelectorAll(`#days .day-toggle[data-state="${stateName}"]`)]
+    .map((button) => button.dataset.day)
+    .filter(Boolean);
+}
+
 function addRepeated(params, key, values) {
   values.forEach((value) => params.append(key, value));
 }
@@ -700,7 +862,8 @@ function buildParams(page = state.page) {
     .filter(Boolean);
   addRepeated(params, "completed_course", completed);
 
-  addRepeated(params, "day", checkedValues("day"));
+  addRepeated(params, "day", dayValues("include"));
+  addRepeated(params, "exclude_day", dayValues("exclude"));
   addIfPresent(params, "time_from", document.querySelector("#time-from").value);
   addIfPresent(params, "time_to", document.querySelector("#time-to").value);
   addRepeated(params, "instruction_mode", checkedValues("instruction_mode"));
@@ -709,8 +872,6 @@ function buildParams(page = state.page) {
   addIfPresent(params, "difficulty_max", document.querySelector("#difficulty-max").value);
   addIfPresent(params, "would_take_again_min", document.querySelector("#would-take-again-min").value);
   addIfPresent(params, "reviews_min", document.querySelector("#reviews-min").value);
-  addIfPresent(params, "attendance_required", document.querySelector("#attendance-required").value);
-  addIfPresent(params, "textbook_required", document.querySelector("#textbook-required").value);
   params.set("sort_by", document.querySelector("#sort-by").value);
   params.set("page", String(page));
   params.set("page_size", String(state.pageSize));
@@ -853,16 +1014,36 @@ function populateOptions(options) {
   const days = document.querySelector("#days");
   days.replaceChildren();
   Object.entries(dayLabels).forEach(([value, text]) => {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.name = "day";
-    input.value = value;
-    const span = document.createElement("span");
-    span.textContent = text;
-    label.append(input, span);
-    days.appendChild(label);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "day-toggle";
+    button.dataset.day = value;
+    button.dataset.state = "off";
+    button.textContent = text;
+    button.setAttribute("aria-label", `${text}: not filtered. Click to include.`);
+    button.addEventListener("click", () => {
+      const nextState = button.dataset.state === "off"
+        ? "include"
+        : button.dataset.state === "include"
+          ? "exclude"
+          : "off";
+      button.dataset.state = nextState;
+      button.setAttribute(
+        "aria-label",
+        nextState === "include"
+          ? `${text}: included. Click to exclude.`
+          : nextState === "exclude"
+            ? `${text}: excluded. Click to clear.`
+            : `${text}: not filtered. Click to include.`,
+      );
+      scheduleLoad();
+    });
+    days.appendChild(button);
   });
+  const dayHelp = document.createElement("p");
+  dayHelp.className = "microcopy day-filter-help";
+  dayHelp.textContent = "Click once to include a day, twice to exclude it, and a third time to clear it.";
+  days.insertAdjacentElement("afterend", dayHelp);
   syncClassificationAvailability();
 }
 
@@ -2311,7 +2492,8 @@ function renderActiveFilters(params) {
 
     const chip = document.createElement("span");
     chip.className = "filter-chip";
-    chip.textContent = `${key.replaceAll("_", " ")}: ${labels[value] || dayLabels[value] || value}`;
+    const displayKey = key === "exclude_day" ? "exclude day" : key.replaceAll("_", " ");
+    chip.textContent = `${displayKey}: ${labels[value] || dayLabels[value] || value}`;
     container.appendChild(chip);
   });
 }
@@ -2442,11 +2624,7 @@ function setupFilterFlyouts() {
   const groups = [...filters.querySelectorAll(":scope > details")];
   if (!groups.length) return;
 
-  const sideFlyoutBreakpoint = 760;
-  const minimumFlyoutWidth = 200;
-  const preferredFlyoutWidth = 340;
-  const viewportPadding = 8;
-  const flyoutGap = 12;
+  const sideFlyoutBreakpoint = 900;
   let animationFrame = 0;
 
   const openGroup = () => groups.find((group) => group.open);
@@ -2458,19 +2636,12 @@ function setupFilterFlyouts() {
   }
 
   function syncFlyoutMode() {
-    const railLeft = filters.getBoundingClientRect().left;
-    const availableLeftSpace = Math.floor(railLeft - viewportPadding - flyoutGap);
-    const useSideFlyout = window.innerWidth > sideFlyoutBreakpoint && availableLeftSpace >= minimumFlyoutWidth;
-
+    const useSideFlyout = window.innerWidth > sideFlyoutBreakpoint;
     filters.classList.toggle("filters-side-flyout", useSideFlyout);
-    if (useSideFlyout) {
-      filters.style.setProperty(
-        "--filter-flyout-width",
-        `${Math.min(preferredFlyoutWidth, availableLeftSpace)}px`,
-      );
-    } else {
-      filters.style.removeProperty("--filter-flyout-width");
-      filters.style.setProperty("--filter-flyout-shift", "0px");
+
+    if (!useSideFlyout) {
+      filters.style.setProperty("--filter-flyout-x-shift", "0px");
+      filters.style.setProperty("--filter-flyout-y-shift", "0px");
     }
 
     positionOpenFlyout();
@@ -2479,23 +2650,36 @@ function setupFilterFlyouts() {
   function positionOpenFlyout() {
     const group = openGroup();
     if (!group || !filters.classList.contains("filters-side-flyout")) {
-      filters.style.setProperty("--filter-flyout-shift", "0px");
+      filters.style.setProperty("--filter-flyout-x-shift", "0px");
+      filters.style.setProperty("--filter-flyout-y-shift", "0px");
       return;
     }
 
     const body = group.querySelector(":scope > .filter-body");
     if (!body) return;
 
-    filters.style.setProperty("--filter-flyout-shift", "0px");
+    filters.style.setProperty("--filter-flyout-x-shift", "0px");
+    filters.style.setProperty("--filter-flyout-y-shift", "0px");
+
     const rect = body.getBoundingClientRect();
-    const topLimit = 12;
-    const bottomLimit = window.innerHeight - 12;
-    let shift = 0;
+    const edge = 12;
+    let xShift = 0;
+    let yShift = 0;
 
-    if (rect.bottom > bottomLimit) shift -= rect.bottom - bottomLimit;
-    if (rect.top + shift < topLimit) shift += topLimit - (rect.top + shift);
+    // Prefer extending left, but never let the popout be clipped by the
+    // viewport. If the filter rail is close to the left edge, this naturally
+    // makes more of the popout overlap the rail, like a native select menu.
+    if (rect.left < edge) xShift += edge - rect.left;
+    if (rect.right + xShift > window.innerWidth - edge) {
+      xShift -= rect.right + xShift - (window.innerWidth - edge);
+    }
 
-    filters.style.setProperty("--filter-flyout-shift", `${Math.round(shift)}px`);
+    const bottomLimit = window.innerHeight - edge;
+    if (rect.bottom > bottomLimit) yShift -= rect.bottom - bottomLimit;
+    if (rect.top + yShift < edge) yShift += edge - (rect.top + yShift);
+
+    filters.style.setProperty("--filter-flyout-x-shift", `${Math.round(xShift)}px`);
+    filters.style.setProperty("--filter-flyout-y-shift", `${Math.round(yShift)}px`);
   }
 
   function requestFlyoutPosition() {
@@ -2546,6 +2730,11 @@ function setupFilterFlyouts() {
 
 function clearFilters() {
   document.querySelectorAll('.filters input[type="checkbox"]').forEach((input) => { input.checked = false; });
+  document.querySelectorAll('#days .day-toggle').forEach((button) => {
+    button.dataset.state = "off";
+    const label = button.textContent.trim();
+    button.setAttribute("aria-label", `${label}: not filtered. Click to include.`);
+  });
   const defaultCampus = document.querySelector('input[name="campus"][value="San Diego Campus"]');
   if (defaultCampus) defaultCampus.checked = true;
   document.querySelectorAll('.filters input:not([type="checkbox"]), .filters select').forEach((control) => { control.value = ""; });
@@ -2559,6 +2748,7 @@ function clearFilters() {
 }
 
 async function boot() {
+  setupThemePicker();
   updateFavoritesCount();
   setupFilterFlyouts();
   syncPageFromHash();

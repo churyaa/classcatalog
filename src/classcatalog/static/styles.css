@@ -1,28 +1,227 @@
 :root {
-  --ink: #16202a;
-  --muted: #617080;
-  --paper: #f5f2ec;
-  --surface: #ffffff;
-  --line: #dfe3e7;
-  --red: #a6192e;
-  --red-dark: #7f1222;
-  --gold: #d6a84b;
-  --shadow: 0 14px 35px rgba(22, 32, 42, 0.09);
+  --theme-background: #f5f2ec;
+  --theme-accent: #a6192e;
+  --theme-text: #16202a;
+  --theme-ui: #7b848d;
+  --paper: var(--theme-background);
+  --ink: var(--theme-text);
+  --muted: color-mix(in srgb, var(--theme-text) 62%, var(--theme-background));
+  --surface: color-mix(in srgb, var(--theme-ui) 10%, var(--theme-background));
+  --surface-soft: color-mix(in srgb, var(--theme-ui) 6%, var(--theme-background));
+  --surface-raised: color-mix(in srgb, var(--theme-ui) 17%, var(--theme-background));
+  --line: color-mix(in srgb, var(--theme-ui) 46%, var(--theme-background));
+  --red: var(--theme-accent);
+  --red-dark: color-mix(in srgb, var(--theme-accent) 76%, var(--theme-text));
+  --gold: var(--theme-accent);
+  --shadow: 0 14px 35px color-mix(in srgb, var(--theme-text) 11%, transparent);
   --toolbar-sticky-height: 5rem;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--paper);
+  color-scheme: light;
+}
+
+:root[data-theme="sdsu-dark"] {
+  --theme-background: #000000;
+  --theme-accent: #d41736;
+  --theme-text: #cdcdc8;
+  --theme-ui: #ffffff;
+  color-scheme: dark;
+}
+
+:root[data-theme="80s-after-dark"] {
+  --theme-background: #1b1d36;
+  --theme-accent: #fca6d1;
+  --theme-text: #e1e7ec;
+  --theme-ui: #99d6ea;
+  color-scheme: dark;
+}
+
+:root[data-theme="aether"] {
+  --theme-background: #101820;
+  --theme-accent: #eedaea;
+  --theme-text: #eedaea;
+  --theme-ui: #cf6bdd;
+  color-scheme: dark;
+}
+
+:root[data-theme="aurora"] {
+  --theme-background: #011926;
+  --theme-accent: #00e980;
+  --theme-text: #ffffff;
+  --theme-ui: #245c69;
+  color-scheme: dark;
+}
+
+:root[data-theme="blue-dolphin"] {
+  --theme-background: #003950;
+  --theme-accent: #ffcefb;
+  --theme-text: #82eaff;
+  --theme-ui: #00e4ff;
+  color-scheme: dark;
+}
+
+:root[data-theme="blueberry-dark"] {
+  --theme-background: #212b42;
+  --theme-accent: #add7ff;
+  --theme-text: #91b4d5;
+  --theme-ui: #5c7da5;
+  color-scheme: dark;
+}
+
+:root[data-theme="bushido"] {
+  --theme-background: #242933;
+  --theme-accent: #ec4c56;
+  --theme-text: #f6f0e9;
+  --theme-ui: #596172;
+  color-scheme: dark;
+}
+
+:root[data-theme="catppuccin"] {
+  --theme-background: #1e1e2e;
+  --theme-accent: #cba6f7;
+  --theme-text: #cdd6f4;
+  --theme-ui: #7f849c;
+  color-scheme: dark;
+}
+
+:root[data-theme="chaos-theory"] {
+  --theme-background: #141221;
+  --theme-accent: #fd77d7;
+  --theme-text: #dde5ed;
+  --theme-ui: #676e8a;
+  color-scheme: dark;
+}
+
+:root[data-theme="cyberspace"] {
+  --theme-background: #181c18;
+  --theme-accent: #00ce7c;
+  --theme-text: #c2fbe1;
+  --theme-ui: #9578d3;
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] {
+  --theme-background: #111111;
+  --theme-accent: #eeeeee;
+  --theme-text: #eeeeee;
+  --theme-ui: #444444;
+  color-scheme: dark;
+}
+
+:root[data-theme="dark-magic-girl"] {
+  --theme-background: #091f2c;
+  --theme-accent: #f5b1cc;
+  --theme-text: #a288d9;
+  --theme-ui: #93e8d3;
+  color-scheme: dark;
+}
+
+:root[data-theme="dots"] {
+  --theme-background: #121520;
+  --theme-accent: #ffffff;
+  --theme-text: #ffffff;
+  --theme-ui: #676e8a;
+  color-scheme: dark;
+}
+
+:root[data-theme="dracula"] {
+  --theme-background: #282a36;
+  --theme-accent: #bd93f9;
+  --theme-text: #f8f8f2;
+  --theme-ui: #6272a4;
+  color-scheme: dark;
+}
+
+:root[data-theme="drowning"] {
+  --theme-background: #191826;
+  --theme-accent: #4a6fb5;
+  --theme-text: #9393a7;
+  --theme-ui: #50688c;
+  color-scheme: dark;
+}
+
+:root[data-theme="ez-mode"] {
+  --theme-background: #0068c6;
+  --theme-accent: #fa62d5;
+  --theme-text: #ffffff;
+  --theme-ui: #138bf7;
+  color-scheme: dark;
+}
+
+:root[data-theme="fire"] {
+  --theme-background: #0f0000;
+  --theme-accent: #b31313;
+  --theme-text: #ffffff;
+  --theme-ui: #683434;
+  color-scheme: dark;
+}
+
+:root[data-theme="fledgling"] {
+  --theme-background: #3b363f;
+  --theme-accent: #fc6e83;
+  --theme-text: #e6d5d3;
+  --theme-ui: #8e5568;
+  color-scheme: dark;
+}
+
+:root[data-theme="future-funk"] {
+  --theme-background: #2e1a47;
+  --theme-accent: #f7f2ea;
+  --theme-text: #f7f2ea;
+  --theme-ui: #c18fff;
+  color-scheme: dark;
+}
+
+:root[data-theme="hammerhead"] {
+  --theme-background: #030613;
+  --theme-accent: #4fcdb9;
+  --theme-text: #e2f1f5;
+  --theme-ui: #213c53;
+  color-scheme: dark;
+}
+
+:root[data-theme="husqy"] {
+  --theme-background: #000000;
+  --theme-accent: #c58aff;
+  --theme-text: #ebd7ff;
+  --theme-ui: #972fff;
+  color-scheme: dark;
+}
+
+:root[data-theme="iceberg-dark"] {
+  --theme-background: #161821;
+  --theme-accent: #84a0c6;
+  --theme-text: #c6c8d1;
+  --theme-ui: #595e76;
+  color-scheme: dark;
+}
+
+:root[data-theme="after-dark"] {
+  --theme-background: #1f2238;
+  --theme-accent: #73c9ff;
+  --theme-text: #eef3ff;
+  --theme-ui: #9b8ee3;
+  color-scheme: dark;
+}
+
+:root[data-theme="neon-sunset"] {
+  --theme-background: #2f2b46;
+  --theme-accent: #ff3b3b;
+  --theme-text: #f0ad20;
+  --theme-ui: #858d92;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; min-height: 100vh; }
+body { margin: 0; min-height: 100vh; color: var(--theme-text); background: var(--theme-background); }
 button, input, select { font: inherit; }
 button, select, input { color: inherit; }
 
 .site-header {
   padding: .95rem 1.5rem .55rem;
-  color: #767d84;
+  color: var(--theme-ui);
   background: transparent;
 }
 .site-header-inner {
@@ -38,7 +237,7 @@ button, select, input { color: inherit; }
   flex: 0 0 auto;
   align-items: center;
   gap: .4rem;
-  color: var(--ink);
+  color: var(--theme-ui);
   text-decoration: none;
 }
 .brand-logo {
@@ -46,7 +245,9 @@ button, select, input { color: inherit; }
   flex: 0 0 auto;
   width: 3.25rem;
   height: 2.5rem;
-  object-fit: contain;
+  background: var(--theme-accent);
+  -webkit-mask: url("/static/classcatalog_outline_cc_logo_v5.svg?v=3") center / contain no-repeat;
+  mask: url("/static/classcatalog_outline_cc_logo_v5.svg?v=3") center / contain no-repeat;
 }
 .site-header h1 {
   margin: 0;
@@ -54,6 +255,10 @@ button, select, input { color: inherit; }
   font-weight: 650;
   letter-spacing: -.055em;
   line-height: 1;
+  color: var(--theme-ui);
+  /* The visible notebook/CC artwork sits slightly above the SVG canvas center.
+     Match the wordmark to the CC artwork rather than the full SVG viewBox. */
+  transform: translateY(-.06rem);
 }
 .header-note { max-width: 34rem; margin: 0; color: var(--muted); font-size: .9rem; text-align: right; }
 .header-actions {
@@ -76,7 +281,7 @@ button, select, input { color: inherit; }
   padding: 0;
   border: 0;
   border-radius: .5rem;
-  color: #777e85;
+  color: var(--theme-ui);
   background: transparent;
   font-weight: 850;
   line-height: 1;
@@ -130,7 +335,7 @@ button, select, input { color: inherit; }
   padding: 0 .22rem;
   border-radius: 999px;
   color: #2b3137;
-  background: var(--gold);
+  background: var(--theme-accent);
   font-size: .57rem;
   font-weight: 900;
   line-height: 1;
@@ -195,9 +400,14 @@ input:focus, select:focus, button:focus-visible { border-color: var(--red); box-
 .result-summary small { margin-top: .3rem; color: var(--muted); font-size: .67rem; white-space: nowrap; }
 
 .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 1.25rem; margin-top: 1.25rem; align-items: start; }
+/* Desktop filter popouts behave like a select menu: the normal 300px filter
+   rail never changes size or position. The active filter body is layered over
+   part of the rail and extends toward the left without reserving layout space. */
 .filters {
-  --filter-flyout-width: 20rem;
-  --filter-flyout-shift: 0px;
+  --filter-flyout-width: 20.625rem;
+  --filter-flyout-overlap: 6.25rem;
+  --filter-flyout-x-shift: 0px;
+  --filter-flyout-y-shift: 0px;
   position: relative;
   border: 1px solid var(--line);
   border-radius: 1rem;
@@ -250,13 +460,21 @@ input:focus, select:focus, button:focus-visible { border-color: var(--red); box-
   line-height: 1;
   transition: color .14s ease, transform .14s ease;
 }
-.filters > details > summary:hover { color: var(--red-dark); background: #faf7f7; }
-.filters > details[open] > summary { color: var(--red); background: #fff7f8; }
+.filters > details > summary:hover {
+  color: var(--red-dark);
+  background: color-mix(in srgb, var(--theme-ui) 9%, var(--theme-background));
+}
+.filters > details[open] > summary {
+  color: var(--red);
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-background));
+}
 .filters > details[open] > summary::after { color: var(--red); transform: rotate(180deg); }
 .filter-body { padding: 0 1rem 1rem; }
 
-/* On wide layouts the category stays in the rail and its controls open into
-   the otherwise-unused space to the left, instead of making the rail taller. */
+/* On desktop, clicking a filter row opens a dropdown-like popout. It overlaps
+   the left portion of the filter rail (rather than moving/shrinking the rail)
+   and extends left when room is available. setupFilterFlyouts() keeps exactly
+   one group open and nudges the overlay back inside the viewport when needed. */
 .filters.filters-side-flyout > details > summary::after {
   content: "‹";
   font-size: 1.28rem;
@@ -267,30 +485,19 @@ input:focus, select:focus, button:focus-visible { border-color: var(--red); box-
   position: absolute;
   z-index: 45;
   top: -.45rem;
-  right: calc(100% + .7rem);
-  width: var(--filter-flyout-width);
+  right: var(--filter-flyout-overlap);
+  width: min(var(--filter-flyout-width), calc(100vw - 1.5rem));
   max-height: calc(100vh - 2rem);
   overflow-x: hidden;
   overflow-y: auto;
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: .9rem;
+  color: var(--theme-text);
   background: var(--surface);
-  box-shadow: 0 18px 45px rgba(22, 32, 42, .16);
+  box-shadow: none;
   overscroll-behavior: contain;
-  transform: translateY(var(--filter-flyout-shift));
-}
-.filters.filters-side-flyout > details[open] > .filter-body::after {
-  content: "";
-  position: absolute;
-  top: 1.2rem;
-  right: -.38rem;
-  width: .7rem;
-  height: .7rem;
-  border-top: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  background: var(--surface);
-  transform: rotate(45deg);
+  transform: translate(var(--filter-flyout-x-shift), var(--filter-flyout-y-shift));
 }
 .filters.filters-side-flyout > details[open] > .filter-body.stack { display: grid; }
 .stack { display: grid; gap: .75rem; }
@@ -392,9 +599,33 @@ label { display: grid; gap: .35rem; color: #36424d; }
 }
 .time-reset:hover { border-color: var(--red); color: var(--red-dark); background: #fff0f2; }
 .day-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .35rem; }
-.day-grid label { display: flex; align-items: center; justify-content: center; min-height: 2.2rem; border: 1px solid #cfd4d9; border-radius: .55rem; background: #f7f8f9; cursor: pointer; }
-.day-grid input { position: absolute; opacity: 0; pointer-events: none; }
-.day-grid label:has(input:checked) { border-color: var(--red); color: white; background: var(--red); }
+.day-grid .day-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+  padding: .35rem .45rem;
+  border: 1px solid var(--line);
+  border-radius: .55rem;
+  color: var(--theme-text);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 850;
+}
+.day-grid .day-toggle:hover { border-color: var(--theme-accent); }
+.day-grid .day-toggle[data-state="include"] {
+  border-color: var(--theme-accent);
+  color: var(--theme-background);
+  background: var(--theme-accent);
+}
+.day-grid .day-toggle[data-state="exclude"] {
+  border-color: color-mix(in srgb, var(--theme-text) 82%, var(--theme-background));
+  color: var(--theme-background);
+  background: color-mix(in srgb, var(--theme-text) 88%, var(--theme-background));
+}
+.day-filter-help { grid-column: 1 / -1; margin-top: -.05rem; }
 .microcopy { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.45; }
 
 .results { min-width: 0; scroll-margin-top: 6rem; }
@@ -1120,4 +1351,599 @@ footer { padding: 1.4rem clamp(1rem, 4vw, 4rem) 2rem; color: var(--muted); text-
 .component-seat-freshness.pending {
   color: var(--muted);
   font-weight: 600;
+}
+
+
+/* Four-color theme system -------------------------------------------------- */
+html,
+body { transition: background-color .16s ease, color .16s ease; }
+
+.site-header h1 { color: var(--theme-ui); }
+.header-nav-favorite-icon { color: var(--theme-accent); }
+.header-nav-count { color: var(--theme-background); background: var(--theme-accent); }
+
+.toolbar,
+.filters,
+.course-card,
+.pagination,
+.pagination-top,
+.about-hero,
+.about-card,
+.favorites-heading,
+.admin-heading,
+.admin-section,
+.admin-login-card,
+.component-table,
+.program-summary {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.toolbar { background: color-mix(in srgb, var(--surface) 94%, transparent); }
+.filters.filters-side-flyout > details[open] > .filter-body,
+.course-tooltip,
+.course-tooltip::before,
+.completed-course-suggestions {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+input,
+select,
+.segmented button,
+.page-button,
+.day-grid .day-toggle,
+.time-reset,
+.completed-course-chip,
+.filter-chip,
+.badge:not(.open):not(.waitlist):not(.closed),
+.professor-panel,
+.rmp-stat-list,
+.metric,
+.review-flags span,
+.catalog-status,
+.privacy-row,
+.source-item,
+.admin-metric,
+.admin-file-row,
+.admin-errors-empty,
+.component-header {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+input::placeholder { color: var(--muted); }
+.control-label,
+.result-summary small,
+.microcopy,
+.course-meta,
+.data-label,
+.data-subvalue,
+.rmp-source-label,
+.rmp-stat-row span,
+.metric span,
+.pagination-summary,
+footer,
+.favorites-heading p:last-child,
+.about-updated,
+.component-subvalue,
+.component-professor-meta,
+.program-summary .microcopy,
+.admin-heading p:last-child {
+  color: var(--muted);
+}
+
+label,
+.completed-course-label,
+.filters > details > summary,
+.filter-chip,
+.course-info,
+.rmp-stat-row strong,
+.component-group-title,
+.shared-course-title,
+.component-class-number,
+.component-professor-name,
+.about-hero > p:not(.eyebrow):not(.about-updated),
+.about-card > p,
+.privacy-row span,
+.source-item p,
+.program-summary p {
+  color: var(--theme-text);
+}
+
+.segmented button[aria-pressed="true"],
+.day-grid .day-toggle[data-state="include"],
+.page-button.current {
+  border-color: var(--theme-accent);
+  color: var(--theme-background);
+  background: var(--theme-accent);
+}
+
+.filters > details > summary:hover {
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 7%, var(--surface));
+}
+.filters > details[open] > summary {
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--surface));
+}
+
+.completed-course-chip,
+.time-reset {
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 8%, var(--surface));
+}
+.completed-course-remove { color: var(--theme-accent); }
+.completed-course-remove:hover,
+.time-reset:hover,
+.completed-course-suggestion:hover,
+.completed-course-suggestion.is-active {
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--surface));
+}
+
+.course-info { background: var(--surface-raised); }
+.course-favorite { color: var(--theme-ui); }
+.course-favorite:hover,
+.course-favorite:focus-visible,
+.course-favorite.is-favorite { color: var(--theme-accent); background: color-mix(in srgb, var(--theme-accent) 10%, transparent); }
+.course-favorite.is-favorite .favorite-star-icon path { fill: var(--theme-accent); stroke: var(--theme-accent); }
+
+.badge:not(.open):not(.waitlist):not(.closed),
+.filter-chip,
+.review-flags span {
+  background: color-mix(in srgb, var(--theme-ui) 18%, var(--theme-background));
+}
+
+.pagination,
+.loading,
+.empty { background: color-mix(in srgb, var(--theme-ui) 8%, var(--theme-background)); }
+.page-button:not(.current) { background: var(--surface-raised); }
+
+.about-icon {
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--surface));
+}
+.privacy-row,
+.source-item,
+.program-summary,
+.component-header,
+.catalog-status {
+  background: color-mix(in srgb, var(--theme-ui) 9%, var(--surface));
+}
+
+/* Bottom-right theme picker */
+.theme-picker {
+  position: fixed;
+  right: 1.15rem;
+  bottom: 1.15rem;
+  z-index: 100;
+  display: grid;
+  justify-items: end;
+  gap: .55rem;
+}
+.theme-picker-toggle {
+  display: grid;
+  min-width: 4.95rem;
+  height: 2.7rem;
+  place-items: center;
+  padding: .35rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--theme-text);
+  background: color-mix(in srgb, var(--theme-ui) 20%, var(--theme-background));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--theme-text) 18%, transparent);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+.theme-picker-toggle:hover,
+.theme-picker-toggle[aria-expanded="true"] {
+  border-color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-ui) 28%, var(--theme-background));
+}
+.theme-toggle-swatches,
+.theme-swatches {
+  display: flex;
+  align-items: center;
+}
+.theme-toggle-swatches { gap: .24rem; }
+.theme-toggle-dot,
+.theme-swatches i {
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+.theme-toggle-dot {
+  width: .78rem;
+  height: .78rem;
+  border: 1px solid color-mix(in srgb, var(--theme-text) 18%, transparent);
+}
+.theme-toggle-background { background: var(--theme-background); }
+.theme-toggle-accent { background: var(--theme-accent); }
+.theme-toggle-text { background: var(--theme-text); }
+.theme-toggle-ui { background: var(--theme-ui); }
+.theme-picker-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + .6rem);
+  width: min(20rem, calc(100vw - 2rem));
+  padding: .7rem;
+  border: 1px solid var(--line);
+  border-radius: .9rem;
+  color: var(--theme-text);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 18px 45px color-mix(in srgb, var(--theme-text) 18%, transparent);
+  backdrop-filter: blur(16px);
+}
+.theme-picker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .25rem .35rem .55rem;
+}
+.theme-picker-heading strong { font-size: .8rem; }
+.theme-picker-heading span { color: var(--muted); font-size: .64rem; font-weight: 700; }
+.theme-options {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border-radius: .65rem;
+}
+.theme-option {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  padding: .55rem .65rem;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--theme-text);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.theme-option:hover { background: color-mix(in srgb, var(--theme-ui) 12%, transparent); }
+.theme-option[aria-checked="true"] {
+  border-color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 11%, transparent);
+}
+.theme-option-name { font-size: .76rem; font-weight: 800; }
+.theme-swatches { gap: .22rem; }
+.theme-swatches i {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid color-mix(in srgb, white 22%, transparent);
+  background: var(--swatch);
+}
+.theme-picker-key {
+  margin: .55rem .35rem .1rem;
+  color: var(--muted);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .theme-picker { right: .75rem; bottom: .75rem; }
+  .theme-picker-toggle { min-width: 4.6rem; height: 2.5rem; }
+  .theme-picker-panel { width: min(19rem, calc(100vw - 1.5rem)); }
+}
+
+/* Theme polish: flat surfaces and reliable About-page contrast ------------ */
+:root {
+  --shadow: none;
+}
+
+.toolbar,
+.filters,
+.course-card,
+.pagination,
+.pagination-top,
+.about-hero,
+.about-card,
+.favorites-heading,
+.admin-heading,
+.admin-section,
+.admin-login-card,
+.component-table,
+.program-summary,
+.theme-picker-toggle,
+.theme-picker-panel {
+  box-shadow: none;
+}
+
+.toolbar,
+.theme-picker-toggle,
+.theme-picker-panel {
+  backdrop-filter: none;
+}
+
+.header-nav-button:focus-visible,
+input:focus,
+select:focus,
+button:focus-visible {
+  box-shadow: none;
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+
+.about-note {
+  color: var(--theme-text);
+  border-left-color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-ui) 10%, var(--theme-background));
+}
+.about-note strong {
+  color: var(--theme-text);
+}
+
+/* Header optical alignment + complete Admin theme coverage ---------------- */
+/* The CC cover is the visual reference. Text glyphs and icon SVGs sit a little
+   low inside their own line/view boxes, so offset those elements—not the logo. */
+.site-header h1 {
+  transform: translateY(-.20rem);
+}
+.header-actions {
+  transform: translateY(-.10rem);
+}
+
+/* Admin surfaces should use the same four-color theme model as the browse UI. */
+.admin-view {
+  color: var(--theme-text);
+}
+
+.admin-heading,
+.admin-status-card,
+.admin-section,
+.admin-login-card {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.admin-refresh,
+.admin-seat-refresh-form,
+.admin-professor-override-form,
+.admin-file-row,
+.admin-errors-empty,
+.admin-seat-failure-table,
+.admin-professor-override-table {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+.admin-refresh:hover:not(:disabled) {
+  color: var(--theme-accent);
+  border-color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 8%, var(--surface-raised));
+}
+
+.admin-kicker,
+.admin-checked-at,
+.admin-note,
+.admin-seat-refresh-result,
+.admin-file-row > div:first-child span,
+.admin-file-meta,
+.admin-error-heading span,
+.admin-error-meta,
+.admin-error-row small,
+.admin-professor-override-table td > span,
+.admin-login-card > p:not(.admin-kicker):not(.admin-login-error) {
+  color: var(--muted);
+}
+
+.admin-metric {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--theme-ui) 9%, var(--theme-background));
+}
+.admin-metric-label,
+.admin-metric-note {
+  color: var(--muted);
+}
+.admin-metric-good,
+.admin-metric-warning,
+.admin-metric-bad {
+  border-color: color-mix(in srgb, var(--theme-accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--theme-accent) 8%, var(--surface));
+}
+.admin-metric-good .admin-metric-value,
+.admin-metric-warning .admin-metric-value,
+.admin-metric-bad .admin-metric-value {
+  color: var(--theme-accent);
+}
+
+.admin-health-badge,
+.admin-health-badge.is-good,
+.admin-health-badge.is-bad,
+.admin-seat-failure-status,
+.admin-seat-failure-status.is-unresolved,
+.admin-seat-failure-status.is-recovered {
+  color: var(--theme-text);
+  border: 1px solid color-mix(in srgb, var(--theme-ui) 46%, var(--theme-background));
+  background: color-mix(in srgb, var(--theme-ui) 18%, var(--theme-background));
+}
+.admin-health-badge.is-good,
+.admin-seat-failure-status.is-recovered {
+  color: var(--theme-background);
+  border-color: var(--theme-accent);
+  background: var(--theme-accent);
+}
+.admin-health-badge.is-bad,
+.admin-seat-failure-status.is-unresolved {
+  color: var(--theme-accent);
+  border-color: color-mix(in srgb, var(--theme-accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--surface));
+}
+
+.admin-status-dot,
+.admin-status-dot.is-good,
+.admin-status-dot.is-bad {
+  box-shadow: none;
+}
+.admin-status-dot {
+  background: var(--theme-ui);
+}
+.admin-status-dot.is-good {
+  background: var(--theme-accent);
+}
+.admin-status-dot.is-bad {
+  background: color-mix(in srgb, var(--theme-accent) 70%, var(--theme-text));
+}
+
+.admin-progress {
+  background: color-mix(in srgb, var(--theme-ui) 18%, var(--theme-background));
+}
+.admin-progress span {
+  background: var(--theme-accent);
+}
+
+.admin-seat-failure-table-wrap,
+.admin-professor-override-table-wrap {
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+.admin-seat-failure-table th,
+.admin-seat-failure-table td,
+.admin-professor-override-table th,
+.admin-professor-override-table td {
+  color: var(--theme-text);
+  border-bottom-color: var(--line);
+}
+.admin-seat-failure-table th,
+.admin-professor-override-table th {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--theme-ui) 14%, var(--theme-background));
+}
+.admin-seat-failure-course strong,
+.admin-seat-failure-error,
+.admin-seat-failure-error strong,
+.admin-error-heading strong,
+.admin-error-meta code,
+.admin-error-row p {
+  color: var(--theme-text);
+}
+.admin-seat-failure-course a,
+.admin-professor-override-table a {
+  color: var(--theme-accent);
+}
+
+.admin-warning-list,
+.admin-error-row {
+  color: var(--theme-text);
+  border-color: color-mix(in srgb, var(--theme-accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--theme-accent) 8%, var(--surface));
+}
+.admin-warning-list strong,
+.admin-error-heading strong {
+  color: var(--theme-accent);
+}
+.admin-error-status {
+  color: var(--theme-background);
+  background: var(--theme-accent);
+}
+
+.admin-seat-refresh-result.is-success {
+  color: var(--theme-accent);
+}
+.admin-seat-refresh-result.is-error,
+.admin-login-error,
+.admin-professor-override-remove,
+.admin-logout {
+  color: color-mix(in srgb, var(--theme-accent) 78%, var(--theme-text));
+}
+
+.admin-seat-course-autocomplete input,
+.admin-professor-override-fields input,
+.admin-login-row input {
+  color: var(--theme-text);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+
+/* Theme picker right rail ---------------------------------------------------
+   Keep the desktop picker in a dedicated page rail so it never covers course
+   cards. On narrower screens it returns to normal document flow. */
+@media (min-width: 901px) {
+  body {
+    padding-right: 11.5rem;
+  }
+
+  .theme-picker {
+    right: .75rem;
+    bottom: 1rem;
+    width: 10rem;
+    justify-items: stretch;
+  }
+
+  .theme-picker-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .theme-picker-panel {
+    right: 0;
+    width: 10rem;
+  }
+
+  .theme-picker-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .1rem;
+  }
+
+  .theme-option {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .32rem;
+  }
+
+  .theme-swatches {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .theme-picker-key {
+    text-align: left;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    padding-right: 0;
+  }
+
+  .theme-picker {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    width: min(20rem, calc(100% - 2rem));
+    margin: 0 1rem 1rem auto;
+  }
+
+  .theme-picker-panel {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    margin-bottom: .55rem;
+  }
+}
+
+/* Large theme library: keep the picker contained within the viewport. */
+.theme-picker-panel {
+  max-height: min(42rem, calc(100vh - 5.5rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.theme-options {
+  overflow: visible;
 }

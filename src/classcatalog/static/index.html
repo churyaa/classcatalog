@@ -5,13 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Find and compare SDSU classes with useful schedule and professor filters.">
   <title>ClassCatalog — SDSU class finder</title>
-  <link rel="stylesheet" href="/static/styles.css?v=60&amp;header=3&amp;filters=1">
+  <script>
+    (() => {
+      const cookieName = "classcatalog_theme";
+      const encodedName = `${encodeURIComponent(cookieName)}=`;
+      const match = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(encodedName));
+      let savedTheme = "";
+
+      if (match) {
+        try {
+          savedTheme = decodeURIComponent(match.slice(encodedName.length));
+        } catch (_error) {}
+      }
+
+      if (!savedTheme) {
+        try {
+          savedTheme = localStorage.getItem("classcatalog_theme_v1") || "";
+          if (savedTheme) {
+            let cookie = `${encodedName}${encodeURIComponent(savedTheme)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+            if (window.location.protocol === "https:") cookie += "; Secure";
+            document.cookie = cookie;
+            localStorage.removeItem("classcatalog_theme_v1");
+          }
+        } catch (_error) {}
+      }
+
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css?v=60&amp;header=3&amp;filters=4&amp;themes=8&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=1&amp;filterpopout=1&amp;daystates=1">
 </head>
 <body>
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand-wrap" href="#" aria-label="ClassCatalog home">
-        <img class="brand-logo" src="/static/classcatalog_outline_cc_logo_v5.svg?v=3" alt="" width="52" height="40">
+        <span class="brand-logo" aria-hidden="true"></span>
         <h1>classcatalog</h1>
       </a>
       <nav class="header-actions" aria-label="Primary navigation">
@@ -209,16 +240,6 @@
               </select>
             </label>
             <label>Minimum reviews<input id="reviews-min" type="number" min="0" step="1" placeholder="e.g. 20"></label>
-            <label>Attendance
-              <select id="attendance-required">
-                <option value="">Any / unknown</option><option value="false">Reported not mandatory</option><option value="true">Reported mandatory</option>
-              </select>
-            </label>
-            <label>Textbook
-              <select id="textbook-required">
-                <option value="">Any / unknown</option><option value="false">Reported not needed</option><option value="true">Reported needed</option>
-              </select>
-            </label>
           </div>
         </details>
       </aside>
@@ -575,12 +596,257 @@
     </section>
   </main>
 
+  <div id="theme-picker" class="theme-picker">
+    <button id="theme-picker-toggle" class="theme-picker-toggle" type="button" aria-expanded="false" aria-controls="theme-picker-panel" aria-label="Choose theme" title="Choose theme">
+      <span class="theme-toggle-swatches" aria-hidden="true">
+        <i class="theme-toggle-dot theme-toggle-background"></i>
+        <i class="theme-toggle-dot theme-toggle-accent"></i>
+        <i class="theme-toggle-dot theme-toggle-text"></i>
+        <i class="theme-toggle-dot theme-toggle-ui"></i>
+      </span>
+    </button>
+    <div id="theme-picker-panel" class="theme-picker-panel" hidden>
+      <div class="theme-picker-heading">
+        <strong>Theme</strong>
+        <span>4-color palettes</span>
+      </div>
+      <div class="theme-options" role="radiogroup" aria-label="Choose a ClassCatalog theme">
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="sdsu">
+          <span class="theme-option-name">SDSU Light</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #f5f2ec"></i>
+            <i style="--swatch: #a6192e"></i>
+            <i style="--swatch: #16202a"></i>
+            <i style="--swatch: #7b848d"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="sdsu-dark">
+          <span class="theme-option-name">SDSU Dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #000000"></i>
+            <i style="--swatch: #d41736"></i>
+            <i style="--swatch: #cdcdc8"></i>
+            <i style="--swatch: #ffffff"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="after-dark">
+          <span class="theme-option-name">After Dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #1f2238"></i>
+            <i style="--swatch: #73c9ff"></i>
+            <i style="--swatch: #eef3ff"></i>
+            <i style="--swatch: #9b8ee3"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="80s-after-dark">
+          <span class="theme-option-name">80s after dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #1b1d36"></i>
+            <i style="--swatch: #fca6d1"></i>
+            <i style="--swatch: #e1e7ec"></i>
+            <i style="--swatch: #99d6ea"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="aether">
+          <span class="theme-option-name">aether</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #101820"></i>
+            <i style="--swatch: #eedaea"></i>
+            <i style="--swatch: #eedaea"></i>
+            <i style="--swatch: #cf6bdd"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="aurora">
+          <span class="theme-option-name">aurora</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #011926"></i>
+            <i style="--swatch: #00e980"></i>
+            <i style="--swatch: #ffffff"></i>
+            <i style="--swatch: #245c69"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="blue-dolphin">
+          <span class="theme-option-name">blue dolphin</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #003950"></i>
+            <i style="--swatch: #ffcefb"></i>
+            <i style="--swatch: #82eaff"></i>
+            <i style="--swatch: #00e4ff"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="blueberry-dark">
+          <span class="theme-option-name">blueberry dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #212b42"></i>
+            <i style="--swatch: #add7ff"></i>
+            <i style="--swatch: #91b4d5"></i>
+            <i style="--swatch: #5c7da5"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="bushido">
+          <span class="theme-option-name">bushido</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #242933"></i>
+            <i style="--swatch: #ec4c56"></i>
+            <i style="--swatch: #f6f0e9"></i>
+            <i style="--swatch: #596172"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="catppuccin">
+          <span class="theme-option-name">catppuccin</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #1e1e2e"></i>
+            <i style="--swatch: #cba6f7"></i>
+            <i style="--swatch: #cdd6f4"></i>
+            <i style="--swatch: #7f849c"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="chaos-theory">
+          <span class="theme-option-name">chaos theory</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #141221"></i>
+            <i style="--swatch: #fd77d7"></i>
+            <i style="--swatch: #dde5ed"></i>
+            <i style="--swatch: #676e8a"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="cyberspace">
+          <span class="theme-option-name">cyberspace</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #181c18"></i>
+            <i style="--swatch: #00ce7c"></i>
+            <i style="--swatch: #c2fbe1"></i>
+            <i style="--swatch: #9578d3"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="dark">
+          <span class="theme-option-name">dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #111111"></i>
+            <i style="--swatch: #eeeeee"></i>
+            <i style="--swatch: #eeeeee"></i>
+            <i style="--swatch: #444444"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="dark-magic-girl">
+          <span class="theme-option-name">dark magic girl</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #091f2c"></i>
+            <i style="--swatch: #f5b1cc"></i>
+            <i style="--swatch: #a288d9"></i>
+            <i style="--swatch: #93e8d3"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="dots">
+          <span class="theme-option-name">dots</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #121520"></i>
+            <i style="--swatch: #ffffff"></i>
+            <i style="--swatch: #ffffff"></i>
+            <i style="--swatch: #676e8a"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="dracula">
+          <span class="theme-option-name">dracula</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #282a36"></i>
+            <i style="--swatch: #bd93f9"></i>
+            <i style="--swatch: #f8f8f2"></i>
+            <i style="--swatch: #6272a4"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="drowning">
+          <span class="theme-option-name">drowning</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #191826"></i>
+            <i style="--swatch: #4a6fb5"></i>
+            <i style="--swatch: #9393a7"></i>
+            <i style="--swatch: #50688c"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="ez-mode">
+          <span class="theme-option-name">ez mode</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #0068c6"></i>
+            <i style="--swatch: #fa62d5"></i>
+            <i style="--swatch: #ffffff"></i>
+            <i style="--swatch: #138bf7"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="fire">
+          <span class="theme-option-name">fire</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #0f0000"></i>
+            <i style="--swatch: #b31313"></i>
+            <i style="--swatch: #ffffff"></i>
+            <i style="--swatch: #683434"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="fledgling">
+          <span class="theme-option-name">fledgling</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #3b363f"></i>
+            <i style="--swatch: #fc6e83"></i>
+            <i style="--swatch: #e6d5d3"></i>
+            <i style="--swatch: #8e5568"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="future-funk">
+          <span class="theme-option-name">future funk</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #2e1a47"></i>
+            <i style="--swatch: #f7f2ea"></i>
+            <i style="--swatch: #f7f2ea"></i>
+            <i style="--swatch: #c18fff"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="hammerhead">
+          <span class="theme-option-name">hammerhead</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #030613"></i>
+            <i style="--swatch: #4fcdb9"></i>
+            <i style="--swatch: #e2f1f5"></i>
+            <i style="--swatch: #213c53"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="husqy">
+          <span class="theme-option-name">husqy</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #000000"></i>
+            <i style="--swatch: #c58aff"></i>
+            <i style="--swatch: #ebd7ff"></i>
+            <i style="--swatch: #972fff"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="iceberg-dark">
+          <span class="theme-option-name">iceberg dark</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #161821"></i>
+            <i style="--swatch: #84a0c6"></i>
+            <i style="--swatch: #c6c8d1"></i>
+            <i style="--swatch: #595e76"></i>
+          </span>
+        </button>
+        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-option="neon-sunset">
+          <span class="theme-option-name">Neon Sunset</span>
+          <span class="theme-swatches" aria-hidden="true">
+            <i style="--swatch: #2f2b46"></i>
+            <i style="--swatch: #ff3b3b"></i>
+            <i style="--swatch: #f0ad20"></i>
+            <i style="--swatch: #858d92"></i>
+          </span>
+        </button>
+      </div>
+      <p class="theme-picker-key">background · accent · text · UI</p>
+    </div>
+  </div>
+
   <footer>
     <div class="footer-inner">
       <p>Planning aid only. Always verify prerequisites, enrollment rules, meeting details, and seat status with SDSU.</p>
       <a href="#about">About &amp; Privacy</a>
     </div>
   </footer>
-  <script src="/static/app.js?v=60&amp;filters=1" defer></script>
+  <script src="/static/app.js?v=60&amp;filters=2&amp;themes=7&amp;library=2&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1" defer></script>
 </body>
 </html>

@@ -226,6 +226,64 @@ def test_time_window_excludes_async_and_outside_meetings() -> None:
     assert {item.course_code for item in results.items} == {"CS 150"}
 
 
+def test_excluded_days_remove_sections_meeting_on_that_day() -> None:
+    template = repository.search(SearchFilters()).items[0]
+    monday = template.model_copy(
+        update={
+            "id": "monday-section",
+            "course_code": "TEST 101",
+            "subject": "TEST",
+            "catalog_number": "101",
+            "meetings": (Meeting(days=(Weekday.MON,), start_time=time(9), end_time=time(10)),),
+        }
+    )
+    tuesday = template.model_copy(
+        update={
+            "id": "tuesday-section",
+            "course_code": "TEST 102",
+            "subject": "TEST",
+            "catalog_number": "102",
+            "meetings": (Meeting(days=(Weekday.TUE,), start_time=time(9), end_time=time(10)),),
+        }
+    )
+    custom_repository = CourseRepository((monday, tuesday))
+
+    results = custom_repository.search(SearchFilters(excluded_days=(Weekday.MON,)))
+
+    assert [item.id for item in results.items] == ["tuesday-section"]
+
+
+def test_included_and_excluded_days_are_combined() -> None:
+    template = repository.search(SearchFilters()).items[0]
+    monday_wednesday = template.model_copy(
+        update={
+            "id": "monday-wednesday",
+            "course_code": "TEST 201",
+            "subject": "TEST",
+            "catalog_number": "201",
+            "meetings": (
+                Meeting(days=(Weekday.MON, Weekday.WED), start_time=time(9), end_time=time(10)),
+            ),
+        }
+    )
+    monday_only = template.model_copy(
+        update={
+            "id": "monday-only",
+            "course_code": "TEST 202",
+            "subject": "TEST",
+            "catalog_number": "202",
+            "meetings": (Meeting(days=(Weekday.MON,), start_time=time(9), end_time=time(10)),),
+        }
+    )
+    custom_repository = CourseRepository((monday_wednesday, monday_only))
+
+    results = custom_repository.search(
+        SearchFilters(days=(Weekday.MON,), excluded_days=(Weekday.WED,))
+    )
+
+    assert [item.id for item in results.items] == ["monday-only"]
+
+
 def test_search_can_match_course_description() -> None:
     results = repository.search(SearchFilters(query="computational problem solving"))
     assert [item.course_code for item in results.items] == ["CS 150"]

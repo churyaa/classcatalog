@@ -31,6 +31,7 @@ class SearchFilters:
     major_only: bool = True
     completed_courses: tuple[str, ...] = ()
     days: tuple[Weekday, ...] = ()
+    excluded_days: tuple[Weekday, ...] = ()
     time_from: time | None = None
     time_to: time | None = None
     instruction_modes: tuple[InstructionMode, ...] = ()
@@ -172,6 +173,11 @@ def matches(section: CourseSection, filters: SearchFilters) -> bool:
     if filters.days:
         selected_days = set(filters.days)
         if not any(selected_days.intersection(meeting.days) for meeting in section.meetings):
+            return False
+
+    if filters.excluded_days:
+        excluded_days = set(filters.excluded_days)
+        if any(excluded_days.intersection(meeting.days) for meeting in section.meetings):
             return False
 
     if not _matches_time_window(section, filters):
