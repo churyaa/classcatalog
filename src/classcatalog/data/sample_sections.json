@@ -1,0 +1,745 @@
+[
+  {
+    "id": "su26-cs150-01",
+    "term": "Summer 2026",
+    "course_code": "CS 150",
+    "subject": "CS",
+    "catalog_number": "150",
+    "section_number": "01",
+    "schedule_number": "10001",
+    "title": "Introduction to Computer Programming",
+    "units": 3,
+    "class_difficulty": 2.7,
+    "grading": "letter",
+    "requirement_tags": [
+      "GE B4: Mathematics/Quantitative Reasoning"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "online_synchronous",
+    "seat_status": "open",
+    "seats_available": 18,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Maya Chen",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed"
+        ],
+        "start_time": "10:00",
+        "end_time": "11:15",
+        "location": "Online"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.7,
+      "difficulty": 2.4,
+      "would_take_again_percent": 94,
+      "num_reviews": 128,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.98
+    },
+    "source_url": "https://example.invalid/section/su26-cs150-01",
+    "source_updated_at": "2026-08-04T10:00:00-07:00",
+    "description": "Computing methodology, process, and computational problem solving. Algorithm Design; program design, development, and testing.",
+    "seat_capacity": 40,
+    "seats_enrolled": 22
+  },
+  {
+    "id": "su26-math150-02",
+    "term": "Summer 2026",
+    "course_code": "MATH 150",
+    "subject": "MATH",
+    "catalog_number": "150",
+    "section_number": "02",
+    "schedule_number": "10002",
+    "title": "Calculus I",
+    "units": 4,
+    "class_difficulty": 4.0,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE B4: Mathematics/Quantitative Reasoning"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      },
+      {
+        "program": "Mathematics, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      }
+    ],
+    "prerequisite_text": "Qualifying placement or approved precalculus course",
+    "prerequisite_groups": [],
+    "prerequisite_manual_review": true,
+    "instruction_mode": "in_person",
+    "seat_status": "waitlist",
+    "seats_available": 0,
+    "waitlist_available": 4,
+    "campus": "San Diego",
+    "instructor": "Daniel Ruiz",
+    "meetings": [
+      {
+        "days": [
+          "tue",
+          "thu"
+        ],
+        "start_time": "08:00",
+        "end_time": "09:50",
+        "location": "GMCS 301"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.1,
+      "difficulty": 3.6,
+      "would_take_again_percent": 78,
+      "num_reviews": 220,
+      "attendance_required": true,
+      "textbook_required": true,
+      "match_confidence": 0.96
+    },
+    "description": "Limits, continuity, differentiation, applications of derivatives, and an introduction to integration.",
+    "seat_capacity": 35,
+    "seats_enrolled": 35
+  },
+  {
+    "id": "su26-rws200-90",
+    "term": "Summer 2026",
+    "course_code": "RWS 200",
+    "subject": "RWS",
+    "catalog_number": "200",
+    "section_number": "90",
+    "schedule_number": "10003",
+    "title": "Rhetoric of Written Arguments in Context",
+    "units": 3,
+    "class_difficulty": 2.3,
+    "grading": "letter",
+    "requirement_tags": [
+      "GE A3: Critical Thinking"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "Completion of lower-division writing requirement",
+    "prerequisite_groups": [
+      [
+        "RWS 100",
+        "RWS 105"
+      ]
+    ],
+    "instruction_mode": "online_asynchronous",
+    "seat_status": "open",
+    "seats_available": 7,
+    "waitlist_available": 0,
+    "campus": "Global Campus",
+    "instructor": "Avery Brooks",
+    "meetings": [],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 3.8,
+      "difficulty": 2.1,
+      "would_take_again_percent": 81,
+      "num_reviews": 44,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.93
+    },
+    "description": "Analysis and construction of written arguments for academic, civic, and professional contexts.",
+    "seat_capacity": 25,
+    "seats_enrolled": 18
+  },
+  {
+    "id": "su26-biol100-01",
+    "term": "Summer 2026",
+    "course_code": "BIOL 100",
+    "subject": "BIOL",
+    "catalog_number": "100",
+    "section_number": "01",
+    "schedule_number": "10004",
+    "title": "General Biology",
+    "units": 3,
+    "class_difficulty": 3.5,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE B2: Life Science"
+    ],
+    "program_tags": [
+      {
+        "program": "Biology, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "hybrid",
+    "seat_status": "closed",
+    "seats_available": 0,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Priya Shah",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed"
+        ],
+        "start_time": "13:00",
+        "end_time": "14:15",
+        "location": "LS 101"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.5,
+      "difficulty": 3.2,
+      "would_take_again_percent": 90,
+      "num_reviews": 76,
+      "attendance_required": true,
+      "textbook_required": false,
+      "match_confidence": 0.97
+    },
+    "description": "Foundations of biology, including cells, genetics, evolution, ecology, and the diversity of living organisms.",
+    "seat_capacity": 40,
+    "seats_enrolled": 40
+  },
+  {
+    "id": "fa26-cs160-01",
+    "term": "Fall 2026",
+    "course_code": "CS 160",
+    "subject": "CS",
+    "catalog_number": "160",
+    "section_number": "01",
+    "schedule_number": "20001",
+    "title": "Intermediate Computer Programming",
+    "units": 3,
+    "class_difficulty": 3.2,
+    "grading": "letter",
+    "requirement_tags": [],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      }
+    ],
+    "prerequisite_text": "CS 150",
+    "prerequisite_groups": [
+      [
+        "CS 150"
+      ]
+    ],
+    "instruction_mode": "in_person",
+    "seat_status": "open",
+    "seats_available": 9,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Jordan Patel",
+    "meetings": [
+      {
+        "days": [
+          "tue",
+          "thu"
+        ],
+        "start_time": "11:00",
+        "end_time": "12:15",
+        "location": "GMCS 314"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.9,
+      "difficulty": 2.8,
+      "would_take_again_percent": 97,
+      "num_reviews": 63,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.99
+    },
+    "description": "Intermediate programming methods, object-oriented design, data organization, testing, and software development practices.",
+    "seat_capacity": 35,
+    "seats_enrolled": 26
+  },
+  {
+    "id": "fa26-comm103-04",
+    "term": "Fall 2026",
+    "course_code": "COMM 103",
+    "subject": "COMM",
+    "catalog_number": "103",
+    "section_number": "04",
+    "schedule_number": "20002",
+    "title": "Oral Communication",
+    "units": 3,
+    "class_difficulty": 1.9,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE A1: Oral Communication"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "in_person",
+    "seat_status": "waitlist",
+    "seats_available": 0,
+    "waitlist_available": 2,
+    "campus": "San Diego",
+    "instructor": "Elena Garcia",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed",
+          "fri"
+        ],
+        "start_time": "09:00",
+        "end_time": "09:50",
+        "location": "COM 207"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.3,
+      "difficulty": 2.0,
+      "would_take_again_percent": 88,
+      "num_reviews": 105,
+      "attendance_required": true,
+      "textbook_required": false,
+      "match_confidence": 0.97
+    },
+    "description": "Principles and practice of effective oral communication, including audience analysis, organization, delivery, and evaluation.",
+    "seat_capacity": 30,
+    "seats_enrolled": 30
+  },
+  {
+    "id": "fa26-hist109-02",
+    "term": "Fall 2026",
+    "course_code": "HIST 109",
+    "subject": "HIST",
+    "catalog_number": "109",
+    "section_number": "02",
+    "schedule_number": "20003",
+    "title": "The United States: A Modern History",
+    "units": 3,
+    "class_difficulty": 3.0,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE D: Social and Behavioral Sciences",
+      "American Institutions"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "online_synchronous",
+    "seat_status": "open",
+    "seats_available": 31,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Noah Williams",
+    "meetings": [
+      {
+        "days": [
+          "tue",
+          "thu"
+        ],
+        "start_time": "15:30",
+        "end_time": "16:45",
+        "location": "Online"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 3.6,
+      "difficulty": 3.0,
+      "would_take_again_percent": 68,
+      "num_reviews": 184,
+      "attendance_required": false,
+      "textbook_required": true,
+      "match_confidence": 0.95
+    },
+    "description": "Political, social, economic, and cultural developments in the modern history of the United States.",
+    "seat_capacity": 60,
+    "seats_enrolled": 29
+  },
+  {
+    "id": "fa26-math151-03",
+    "term": "Fall 2026",
+    "course_code": "MATH 151",
+    "subject": "MATH",
+    "catalog_number": "151",
+    "section_number": "03",
+    "schedule_number": "20004",
+    "title": "Calculus II",
+    "units": 4,
+    "class_difficulty": 4.2,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      },
+      {
+        "program": "Mathematics, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      }
+    ],
+    "prerequisite_text": "MATH 150",
+    "prerequisite_groups": [
+      [
+        "MATH 150"
+      ]
+    ],
+    "instruction_mode": "in_person",
+    "seat_status": "closed",
+    "seats_available": 0,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Sofia Kim",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed",
+          "fri"
+        ],
+        "start_time": "12:00",
+        "end_time": "12:50",
+        "location": "GMCS 305"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.6,
+      "difficulty": 3.9,
+      "would_take_again_percent": 92,
+      "num_reviews": 52,
+      "attendance_required": true,
+      "textbook_required": true,
+      "match_confidence": 0.98
+    },
+    "description": "Techniques and applications of integration, sequences and series, and additional topics in single-variable calculus.",
+    "seat_capacity": 35,
+    "seats_enrolled": 35
+  },
+  {
+    "id": "fa26-econ101-05",
+    "term": "Fall 2026",
+    "course_code": "ECON 101",
+    "subject": "ECON",
+    "catalog_number": "101",
+    "section_number": "05",
+    "schedule_number": "20005",
+    "title": "Principles of Economics",
+    "units": 3,
+    "class_difficulty": 3.1,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE D: Social and Behavioral Sciences"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "hybrid",
+    "seat_status": "open",
+    "seats_available": 14,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Marcus Lee",
+    "meetings": [
+      {
+        "days": [
+          "fri"
+        ],
+        "start_time": "10:00",
+        "end_time": "12:40",
+        "location": "ENS 280"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.0,
+      "difficulty": 2.9,
+      "would_take_again_percent": 74,
+      "num_reviews": 91,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.94
+    },
+    "description": "Introduction to economic reasoning, markets, incentives, and the behavior of consumers, firms, and institutions.",
+    "seat_capacity": 45,
+    "seats_enrolled": 31
+  },
+  {
+    "id": "sp27-cs210-01",
+    "term": "Spring 2027",
+    "course_code": "CS 210",
+    "subject": "CS",
+    "catalog_number": "210",
+    "section_number": "01",
+    "schedule_number": "30001",
+    "title": "Data Structures",
+    "units": 3,
+    "class_difficulty": 3.8,
+    "grading": "letter",
+    "requirement_tags": [],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_course"
+      }
+    ],
+    "prerequisite_text": "CS 160",
+    "prerequisite_groups": [
+      [
+        "CS 160"
+      ]
+    ],
+    "instruction_mode": "in_person",
+    "seat_status": "open",
+    "seats_available": 6,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Maya Chen",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed"
+        ],
+        "start_time": "14:00",
+        "end_time": "15:15",
+        "location": "GMCS 325"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.7,
+      "difficulty": 2.4,
+      "would_take_again_percent": 94,
+      "num_reviews": 128,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.98
+    },
+    "description": "Data structures and algorithms, including lists, stacks, queues, trees, searching, sorting, and complexity analysis.",
+    "seat_capacity": 30,
+    "seats_enrolled": 24
+  },
+  {
+    "id": "sp27-stat250-06",
+    "term": "Spring 2027",
+    "course_code": "STAT 250",
+    "subject": "STAT",
+    "catalog_number": "250",
+    "section_number": "06",
+    "schedule_number": "30002",
+    "title": "Statistical Principles and Practices",
+    "units": 3,
+    "class_difficulty": 3.4,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE B4: Mathematics/Quantitative Reasoning"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      },
+      {
+        "program": "Mathematics, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "major_course"
+      }
+    ],
+    "prerequisite_text": "MATH 120 or higher",
+    "prerequisite_groups": [
+      [
+        "MATH 120",
+        "MATH 150",
+        "MATH 151"
+      ]
+    ],
+    "instruction_mode": "online_asynchronous",
+    "seat_status": "open",
+    "seats_available": 23,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Leila Hassan",
+    "meetings": [],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.8,
+      "difficulty": 2.6,
+      "would_take_again_percent": 96,
+      "num_reviews": 37,
+      "attendance_required": false,
+      "textbook_required": false,
+      "match_confidence": 0.99
+    },
+    "description": "Statistical reasoning, probability, data analysis, estimation, hypothesis testing, and interpretation of results.",
+    "seat_capacity": 50,
+    "seats_enrolled": 27
+  },
+  {
+    "id": "sp27-phil200-02",
+    "term": "Spring 2027",
+    "course_code": "PHIL 200",
+    "subject": "PHIL",
+    "catalog_number": "200",
+    "section_number": "02",
+    "schedule_number": "30003",
+    "title": "Critical Thinking and Composition",
+    "units": 3,
+    "class_difficulty": 2.8,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE A3: Critical Thinking",
+      "GE C2: Humanities"
+    ],
+    "program_tags": [
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "Completion of lower-division writing requirement",
+    "prerequisite_groups": [
+      [
+        "RWS 100",
+        "RWS 105"
+      ]
+    ],
+    "instruction_mode": "in_person",
+    "seat_status": "waitlist",
+    "seats_available": 0,
+    "waitlist_available": 6,
+    "campus": "San Diego",
+    "instructor": "Theo Martin",
+    "meetings": [
+      {
+        "days": [
+          "tue",
+          "thu"
+        ],
+        "start_time": "09:30",
+        "end_time": "10:45",
+        "location": "AH 2112"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 3.9,
+      "difficulty": 2.7,
+      "would_take_again_percent": 72,
+      "num_reviews": 19,
+      "attendance_required": true,
+      "textbook_required": false,
+      "match_confidence": 0.9
+    },
+    "description": "Critical analysis and composition of arguments, with emphasis on reasoning, evidence, fallacies, and clear writing.",
+    "seat_capacity": 25,
+    "seats_enrolled": 25
+  },
+  {
+    "id": "sp27-psych101-08",
+    "term": "Spring 2027",
+    "course_code": "PSY 101",
+    "subject": "PSY",
+    "catalog_number": "101",
+    "section_number": "08",
+    "schedule_number": "30004",
+    "title": "Introductory Psychology",
+    "units": 3,
+    "class_difficulty": 2.5,
+    "grading": "letter_or_credit_no_credit",
+    "requirement_tags": [
+      "GE D: Social and Behavioral Sciences"
+    ],
+    "program_tags": [
+      {
+        "program": "Psychology, B.A.",
+        "catalog_year": "2026-2027",
+        "classification": "major_prep"
+      },
+      {
+        "program": "Computer Science, B.S.",
+        "catalog_year": "2026-2027",
+        "classification": "elective"
+      }
+    ],
+    "prerequisite_text": "None",
+    "prerequisite_groups": [],
+    "instruction_mode": "online_synchronous",
+    "seat_status": "closed",
+    "seats_available": 0,
+    "waitlist_available": 0,
+    "campus": "San Diego",
+    "instructor": "Riley Thompson",
+    "meetings": [
+      {
+        "days": [
+          "mon",
+          "wed"
+        ],
+        "start_time": "17:00",
+        "end_time": "18:15",
+        "location": "Online"
+      }
+    ],
+    "professor": {
+      "provider": "demo-authorized-data",
+      "rating": 4.2,
+      "difficulty": 2.3,
+      "would_take_again_percent": 86,
+      "num_reviews": 147,
+      "attendance_required": false,
+      "textbook_required": true,
+      "match_confidence": 0.96
+    },
+    "description": "Survey of major topics in psychology, including behavior, cognition, development, learning, personality, and social processes.",
+    "seat_capacity": 120,
+    "seats_enrolled": 120
+  }
+]

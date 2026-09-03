@@ -1,0 +1,38 @@
+{
+  "provider": "RateMyProfessors",
+  "school": {
+    "name": "San Diego State University",
+    "legacy_id": 877,
+    "relay_id": "U2Nob29sLTg3Nw=="
+  },
+  "generated_at": "2026-08-25T00:00:00+00:00",
+  "summary": {
+    "instructors": 1,
+    "matched": 1,
+    "unmatched": 0,
+    "errors": 0
+  },
+  "records": [
+    {
+      "name": "Example Professor",
+      "normalized_name": "example professor",
+      "course_codes": ["MATH150"],
+      "rmp_name": "Example Professor",
+      "rmp_department": "Mathematics",
+      "metrics": {
+        "provider": "RateMyProfessors",
+        "external_id": "123456",
+        "rating": 4.5,
+        "difficulty": 2.8,
+        "would_take_again_percent": 91.0,
+        "num_reviews": 42,
+        "attendance_required": null,
+        "textbook_required": null,
+        "profile_url": "https://www.ratemyprofessors.com/professor/123456",
+        "match_confidence": 1.0
+      }
+    }
+  ],
+  "unmatched": [],
+  "errors": []
+}

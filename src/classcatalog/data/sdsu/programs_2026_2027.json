@@ -1,0 +1,1030 @@
+{
+  "catalog_year": "2026-2027",
+  "source": "SDSU academic-plan dropdown supplied for ClassCatalog coverage validation",
+  "plans": [
+    {
+      "plan_code": "441001",
+      "name": "AEROSPACE ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "110301",
+      "name": "AFRICANA STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "110702",
+      "name": "AMERICAN INDIAN STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "110901",
+      "name": "ANTHROPOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660509",
+      "name": "ART - EMPHASIS IN APPLIED DESIGN",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660517",
+      "name": "ART - EMPHASIS IN ART HISTORY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660557",
+      "name": "ART - EMPHASIS IN GRAPHIC DESIGN",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660566",
+      "name": "ART - EMPHASIS IN INTERIOR ARCHITECTURE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660562",
+      "name": "ART - EMPHASIS IN MULTIMEDIA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660573",
+      "name": "ART - EMPHASIS IN PAINTING AND PRINTMAKING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660581",
+      "name": "ART - EMPHASIS IN SCULPTURE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660589",
+      "name": "ART - EMPHASIS IN STUDIO ARTS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660505",
+      "name": "ART - IN PREPARATION FOR SINGLE SUBJECT TEACHING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660519",
+      "name": "ART HISTORY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "115309",
+      "name": "ARTIFICIAL INTELLIGENCE AND HUMAN RESPONSIBILITY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111106",
+      "name": "ASIAN AMERICAN STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111101",
+      "name": "ASIAN STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "770501",
+      "name": "ASTRONOMY - BA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "770502",
+      "name": "ASTRONOMY - BS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "770503",
+      "name": "ASTRONOMY - EMPHASIS IN DATA SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771402",
+      "name": "BIOLOGY - BA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771401",
+      "name": "BIOLOGY - BS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771433",
+      "name": "BIOLOGY - EMPHASIS IN CELLULAR AND MOLECULAR BIOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771434",
+      "name": "BIOLOGY - EMPHASIS IN ECOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771439",
+      "name": "BIOLOGY - EMPHASIS IN EVOLUTIONARY BIOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771436",
+      "name": "BIOLOGY - EMPHASIS IN MARINE BIOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771438",
+      "name": "BIOLOGY - EMPHASIS IN ZOOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771405",
+      "name": "BIOLOGY - IN PREPARATION FOR SINGLE SUBJECT TEACHING",
+      "catalog_names": [
+        "Biology, B.S. in Preparation for the Single Subject Teaching Credential in Science/Biological Sciences"
+      ]
+    },
+    {
+      "plan_code": "115704",
+      "name": "BRAZILIAN STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "221908",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN ACCOUNTING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222115",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN FINANCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222122",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN FINANCIAL SERVICES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "221751",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN GENERAL BUSINESS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222336",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN INFORMATION SYSTEMS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222557",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222771",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN MARKETING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222192",
+      "name": "BUSINESS ADMINISTRATION - EMPHASIS IN REAL ESTATE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "772801",
+      "name": "CHEMICAL PHYSICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "772602",
+      "name": "CHEMISTRY - BA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "772601",
+      "name": "CHEMISTRY - BS",
+      "catalog_names": [
+        "Chemistry, B.S. and Certificate of the American Chemical Society"
+      ]
+    },
+    {
+      "plan_code": "772609",
+      "name": "CHEMISTRY - EMPHASIS IN BIOCHEMISTRY",
+      "catalog_names": [
+        "Chemistry, Emphasis in Biochemistry, B.S. and Certificate of the American Chemical Society"
+      ]
+    },
+    {
+      "plan_code": "772615",
+      "name": "CHEMISTRY - IN PREPARATION FOR SINGLE SUBJECT TEACHING",
+      "catalog_names": [
+        "Chemistry, B.A. Emphasis in Preparation for the Single Subject Teaching Credential"
+      ]
+    },
+    {
+      "plan_code": "772607",
+      "name": "CHEMISTRY - IN PREPARATION FOR SINGLE SUBJECT TEACHING",
+      "catalog_names": [
+        "Chemistry, B.A. Emphasis in Preparation for the Single Subject Teaching Credential"
+      ]
+    },
+    {
+      "plan_code": "772612",
+      "name": "CHEMISTRY - WITH ACS",
+      "catalog_names": [
+        "Chemistry, B.S. and Certificate of the American Chemical Society"
+      ]
+    },
+    {
+      "plan_code": "114905",
+      "name": "CHICANA AND CHICANO STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "330909",
+      "name": "CHILD DEVELOPMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "330910",
+      "name": "CHILD DEVELOPMENT-EMPHASIS IN EARLY CHILDHOOD SPED-ITEP",
+      "catalog_names": [
+        "Child Development, Emphasis in Early Childhood Special Education Integrated Teacher Education (ITEP), B.S."
+      ]
+    },
+    {
+      "plan_code": "442001",
+      "name": "CIVIL ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111525",
+      "name": "CLASSICS - EMPHASIS IN CLASSICAL HUMANITIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111526",
+      "name": "CLASSICS - EMPHASIS IN CLASSICAL LANGUAGE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111527",
+      "name": "CLASSICS - EMPHASIS IN CLASSICAL LANGUAGE WITH HONORS",
+      "catalog_names": [
+        "Classics, Emphasis in Classical Languages with Honors, B.A."
+      ]
+    },
+    {
+      "plan_code": "668131",
+      "name": "COMMUNICATION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "117002",
+      "name": "COMPARATIVE INTERNATIONAL STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "CB117002",
+      "name": "COMPARATIVE INTERNATIONAL STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111701",
+      "name": "COMPARATIVE LITERATURE",
+      "catalog_names": [
+        "English and Comparative Literature, B.A."
+      ]
+    },
+    {
+      "plan_code": "445001",
+      "name": "COMPUTER ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "773801",
+      "name": "COMPUTER SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "442010",
+      "name": "CONSTRUCTION ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "442012",
+      "name": "CONSTRUCTION MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666925",
+      "name": "CRIMINAL JUSTICE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666517",
+      "name": "DANCE - BA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666571",
+      "name": "DANCE - BFA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666573",
+      "name": "DANCE EDUCATION - BFA",
+      "catalog_names": [
+        "Dance, Dance Education Concentration, B.F.A."
+      ]
+    },
+    {
+      "plan_code": "111901",
+      "name": "ECONOMICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111920",
+      "name": "ECONOMICS: EMPHASIS IN INTERNATIONAL ECONOMICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "Z111920",
+      "name": "ECONOMICS: EMPHASIS IN INTERNATIONAL ECONOMICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111961",
+      "name": "ECONOMICS: EMPHASIS IN PUBLIC POLICY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "111970",
+      "name": "ECONOMICS: SPECIALIZATION IN QUANTITATIVE ANALYSIS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "443001",
+      "name": "ELECTRICAL ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112114",
+      "name": "ENGLISH & COMPARATIVE LIT SINGLE SUBJECT TEACHING CREDENTIAL",
+      "catalog_names": [
+        "English and Comparative Literature, B.A. in preparation for the Single Subject Teaching Credential in English Language Arts"
+      ]
+    },
+    {
+      "plan_code": "112113",
+      "name": "ENGLISH AND COMPARATIVE LITERATURE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "442002",
+      "name": "ENVIRONMENTAL ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "777001",
+      "name": "ENVIRONMENTAL SCIENCES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "552931",
+      "name": "FOODS AND NUTRITION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112914",
+      "name": "GEOGRAPHY - EMPHASIS IN ENVIRONMENT, SUSTAINABILITY, AND POLICY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112912",
+      "name": "GEOGRAPHY - EMPHASIS IN GENERAL GEOGRAPHY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112917",
+      "name": "GEOGRAPHY - EMPHASIS IN HUMAN GEOGRAPHY AND GLOBAL STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112988",
+      "name": "GEOGRAPHY - EMPHASIS IN WATER, CLIMATE, AND ECOSYSTEMS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112953",
+      "name": "GEOGRAPHY - GEOGRAPHIC INFORMATION SCIENCE AND TECH (BA)",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "112992",
+      "name": "GEOGRAPHY - GEOGRAPHIC INFORMATION SCIENCE AND TECH (BS)",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775311",
+      "name": "GEOLOGICAL SCIENCES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775313",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775318",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN ENVIRONMENTAL GEOSCIENCES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775324",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN GENERAL GEOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775346",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN GEOPHYSICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775357",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN HYDROGEOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "775390",
+      "name": "GEOLOGICAL SCIENCES - EMPHASIS IN PALEONTOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "551902",
+      "name": "GERONTOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "661140",
+      "name": "HEALTH COMMUNICATION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113301",
+      "name": "HISTORY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "663102",
+      "name": "HOSPITALITY & TOURISM MANAGEMENT: HOTEL OPERATIONS AND MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "663103",
+      "name": "HOSPITALITY & TOURISM MANAGEMENT: RESTAURANT OPS & MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "663106",
+      "name": "HOSPITALITY & TOURISM MANAGEMENT: TRIBAL GAMING OPERATIONS & MGT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "663105",
+      "name": "HOSPITALITY & TOURISM MANAGEMENT:MEETINGS & EVENTS OPERATIONS MGT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113501",
+      "name": "HUMANITIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "660558",
+      "name": "INTEGRATED DESIGN",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113688",
+      "name": "INTERNATIONAL BUSINESS - ARABIC AND MIDDLE EAST AND NORTH AFRICA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113704",
+      "name": "INTERNATIONAL BUSINESS - ASIAN LANGUAGES AND SINGAPORE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113602",
+      "name": "INTERNATIONAL BUSINESS - CHINESE AND ASIA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113650",
+      "name": "INTERNATIONAL BUSINESS - ENGLISH AND NORTH AMERICA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113705",
+      "name": "INTERNATIONAL BUSINESS - EUROPEAN LANGUAGES AND NORTH ATLANTIC",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113622",
+      "name": "INTERNATIONAL BUSINESS - FRENCH AND NORTH AMERICA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113613",
+      "name": "INTERNATIONAL BUSINESS - FRENCH AND WESTERN EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113614",
+      "name": "INTERNATIONAL BUSINESS - GERMAN AND WESTERN EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113616",
+      "name": "INTERNATIONAL BUSINESS - ITALIAN AND WESTERN EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113603",
+      "name": "INTERNATIONAL BUSINESS - JAPANESE AND ASIA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113639",
+      "name": "INTERNATIONAL BUSINESS - KOREAN AND ASIA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113610",
+      "name": "INTERNATIONAL BUSINESS - PORTUGUESE AND LATIN AMERICA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113617",
+      "name": "INTERNATIONAL BUSINESS - PORTUGUESE AND WESTERN EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113608",
+      "name": "INTERNATIONAL BUSINESS - RUSSIAN AND CENTRAL EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113612",
+      "name": "INTERNATIONAL BUSINESS - SPANISH AND LATIN AMERICA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113619",
+      "name": "INTERNATIONAL BUSINESS - SPANISH AND WESTERN EUROPE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "113803",
+      "name": "INTERNATIONAL SECURITY AND CONFLICT RESOLUTION CGS",
+      "catalog_names": [
+        "International Security and Conflict Resolution, Specialization in Conflict in the Global System, B.A."
+      ]
+    },
+    {
+      "plan_code": "113804",
+      "name": "INTERNATIONAL SECURITY AND CONFLICT RESOLUTION ENVR IN THE GS",
+      "catalog_names": [
+        "International Security and Conflict Resolution, Specialization in Environment in the Global System, B.A."
+      ]
+    },
+    {
+      "plan_code": "113805",
+      "name": "INTERNATIONAL SECURITY AND CONFLICT RESOLUTION JUSTICE",
+      "catalog_names": [
+        "International Security and Conflict Resolution, Specialization in Justice in the Global System, B.A."
+      ]
+    },
+    {
+      "plan_code": "115103",
+      "name": "ISLAMIC AND ARABIC STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "664101",
+      "name": "JOURNALISM",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "661108",
+      "name": "JOURNALISM - EMPHASIS IN ADVERTISING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "661110",
+      "name": "JOURNALISM - EMPHASIS IN MEDIA STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "661109",
+      "name": "JOURNALISM - EMPHASIS IN PUBLIC RELATIONS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "556524",
+      "name": "KINESIOLOGY - EMPHASIS IN FITNESS SPECIALIST",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "556511",
+      "name": "KINESIOLOGY - EMPHASIS IN PREPHYSICAL THERAPY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "114731",
+      "name": "LANGUAGE, CULTURE, AND SOCIETY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "114301",
+      "name": "LATIN AMERICAN STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "331908",
+      "name": "LEADERSHIP STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "119508",
+      "name": "LESBIAN, GAY, BISEXUAL, TRANSGENDER, QUEER, AND PLUS STUDIES",
+      "catalog_names": [
+        "Lesbian, Gay, Bisexual, Transgender, Queer, and Plus (LGBTQ+) Studies, B.A."
+      ]
+    },
+    {
+      "plan_code": "331922",
+      "name": "LIBERAL STUDIES - EMPHASIS IN ELEMENTARY EDUCATION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "331923",
+      "name": "LIBERAL STUDIES - EMPHASIS IN MATHEMATICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "331924",
+      "name": "LIBERAL STUDIES - EMPHASIS IN SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "114701",
+      "name": "LINGUISTICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222564",
+      "name": "MANAGEMENT - ENTREPRENEURSHIP",
+      "catalog_names": [
+        "Business Administration, Management, Specialization in Entrepreneurship, B.S."
+      ]
+    },
+    {
+      "plan_code": "222563",
+      "name": "MANAGEMENT - HUMAN RESOURCE MANAGEMENT",
+      "catalog_names": [
+        "Business Administration, Management, Specialization in Human Resource Management, B.S."
+      ]
+    },
+    {
+      "plan_code": "222775",
+      "name": "MARKETING: SPECIALIZATION IN INTEGRATED MARKETING COMMUNICATIONS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "222776",
+      "name": "MARKETING: SPECIALIZATION IN PROFESSIONAL SELLING AND SALES MGMT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776301",
+      "name": "MATHEMATICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776313",
+      "name": "MATHEMATICS EMPHASIS IN APPLIED MATHEMATICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776322",
+      "name": "MATHEMATICS EMPHASIS IN COMPUTATIONAL SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776335",
+      "name": "MATHEMATICS EMPHASIS IN MATHEMATICS EDUCATION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776348",
+      "name": "MATHEMATICS EMPHASIS IN SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776303",
+      "name": "MATHEMATICS FOR THE SINGLE SUBJECT TEACHING CREDENTIAL",
+      "catalog_names": [
+        "Mathematics, B.A., Mathematics Major In preparation for the Single Subject Teaching Credential With the B.A. Degree"
+      ]
+    },
+    {
+      "plan_code": "447001",
+      "name": "MECHANICAL ENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "447002",
+      "name": "MECHANICAL ENGINEERING - EMPHASIS IN BIOENGINEERING",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771451",
+      "name": "MICROBIOLOGY - BS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "771453",
+      "name": "MICROBIOLOGY - EMPHASIS IN CLINICAL LABORATORY SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "114102",
+      "name": "MODERN JEWISH STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665304",
+      "name": "MUSIC",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665324",
+      "name": "MUSIC - ENTREPRENEURSHIP & BUSINESS",
+      "catalog_names": [
+        "Music, Music Entrepreneurship and Business Track, B.M."
+      ]
+    },
+    {
+      "plan_code": "665325",
+      "name": "MUSIC - GENERAL TRACK",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665362",
+      "name": "MUSIC - GLOBAL COMPOSITION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665378",
+      "name": "MUSIC - JAZZ STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665326",
+      "name": "MUSIC - MUSIC RECORDING TECH & AUDIO DESIGN",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "665306",
+      "name": "MUSIC EDUCATION",
+      "catalog_names": [
+        "Music, Music Education Specialization, B.M."
+      ]
+    },
+    {
+      "plan_code": "665381",
+      "name": "MUSIC PERFORMANCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "662509",
+      "name": "MUSICAL THEATRE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "115301",
+      "name": "PHILOSOPHY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "777702",
+      "name": "PHYSICS - BA",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "777701",
+      "name": "PHYSICS - BS",
+      "catalog_names": [
+        "Physics, General Physics, B.S."
+      ]
+    },
+    {
+      "plan_code": "777728",
+      "name": "PHYSICS - MODERN OPTICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "115501",
+      "name": "POLITICAL SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "778307",
+      "name": "PSYCHOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "778312",
+      "name": "PSYCHOLOGY:EMPHASIS IN INDUSTRIAL & ORGANIZATIONAL PSYCHOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "778315",
+      "name": "PSYCHOLOGY:EMPHASIS IN NEUROSCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666901",
+      "name": "PUBLIC ADMINISTRATION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "666919",
+      "name": "PUBLIC ADMINISTRATION - CITY PLANNING EMPHASIS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "557303",
+      "name": "PUBLIC HEALTH",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "557306",
+      "name": "PUBLIC HEALTH: EMPHASIS IN ENVIRONMENTAL HEALTH",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "667751",
+      "name": "RECREATION ADMINISTRATION - OUTDOOR RESOURCE MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "667765",
+      "name": "RECREATION ADMINISTRATION - RECREATION SYSTEMS MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "667766",
+      "name": "RECREATION ADMINISTRATION - SUSTAINABLE TOURISM MANAGEMENT",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "116101",
+      "name": "RELIGIOUS STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "116701",
+      "name": "SOCIAL SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "116703",
+      "name": "SOCIAL SCIENCE FOR THE SINGLE SUBJECT TEACHING CREDENTIAL",
+      "catalog_names": [
+        "Social Science, in Preparation for the Single Subject Teaching Credential, with the B.A."
+      ]
+    },
+    {
+      "plan_code": "558201",
+      "name": "SOCIAL WORK",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "116901",
+      "name": "SOCIOLOGY - GENERAL",
+      "catalog_names": [
+        "Sociology, B.A."
+      ]
+    },
+    {
+      "plan_code": "117101",
+      "name": "SPANISH",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "117103",
+      "name": "SPANISH FOR SINGLE SUBJECT TEACHING CREDENTIAL",
+      "catalog_names": [
+        "Spanish, B.A. in preparation for the Single Subject Teaching Credential in Foreign Languages"
+      ]
+    },
+    {
+      "plan_code": "550107",
+      "name": "SPEECH, LANGUAGE, AND HEARING SCIENCES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776371",
+      "name": "STATISTICS",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776374",
+      "name": "STATISTICS - EMPHASIS IN DATA SCIENCE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "776372",
+      "name": "STATISTICS WITH AN EMPHASIS IN ACTUARIAL SCIENCE",
+      "catalog_names": [
+        "Statistics, Emphasis in Actuarial Science, B.S."
+      ]
+    },
+    {
+      "plan_code": "117001",
+      "name": "SUSTAINABILITY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "667308",
+      "name": "TELEVISION, FILM, AND NEW MEDIA - EMPHASIS IN CRITICAL STUDIES",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "667304",
+      "name": "TELEVISION, FILM, AND NEW MEDIA - EMPHASIS IN PRODUCTION",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "662554",
+      "name": "THEATRE ARTS - EMPHASIS IN DESIGN AND TECHNOLOGY",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "662527",
+      "name": "THEATRE ARTS - EMPHASIS IN YOUTH THEATRE",
+      "catalog_names": []
+    },
+    {
+      "plan_code": "662504",
+      "name": "THEATRE ARTS - GENERAL",
+      "catalog_names": [
+        "Theatre Arts, General Theatre Arts, B.A."
+      ]
+    },
+    {
+      "plan_code": "117011",
+      "name": "URBAN STUDIES - CULTURES AND SOCIETIES",
+      "catalog_names": [
+        "Urban Studies, Urban Cultures and Societies Specialization, B.A."
+      ]
+    },
+    {
+      "plan_code": "117012",
+      "name": "URBAN STUDIES - PLANNING, DESIGN, AND MANAGEMENT",
+      "catalog_names": [
+        "Urban Studies, Urban Planning, Design, and Management Specialization, B.A."
+      ]
+    },
+    {
+      "plan_code": "117013",
+      "name": "URBAN STUDIES - POLITICAL ECONOMY AND PUBLIC POLICY",
+      "catalog_names": [
+        "Urban Studies, Urban Political Economy and Public Policy Specialization, B.A."
+      ]
+    },
+    {
+      "plan_code": "117014",
+      "name": "URBAN STUDIES - SUSTAINABILITY",
+      "catalog_names": [
+        "Urban Studies, Urban Sustainability Specialization, B.A."
+      ]
+    },
+    {
+      "plan_code": "119512",
+      "name": "WOMEN'S AND GENDER STUDIES",
+      "catalog_names": [
+        "Women’s and Gender Studies, B.A."
+      ]
+    },
+    {
+      "plan_code": "112204",
+      "name": "WRITING AND RHETORIC",
+      "catalog_names": [
+        "Rhetoric and Writing Studies, B.A."
+      ]
+    }
+  ]
+}

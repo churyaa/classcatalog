@@ -1,0 +1,41 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# IDE files
+.idea/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Generated application data
+/results/
+/fixtures/
+/imports/
+
+# Build and local artifacts
+*.zip
+*.log
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Private production data
+src/classcatalog/data/sections.json
+src/classcatalog/data/catalog_mappings.json
+src/classcatalog/data/professor_ratings.json
+src/classcatalog/data/seat_cache.json
+
+# Local handoff and update notes
+/*-NOTES.md
+/INSTALL*.txt
+/PACKAGE-NOTES.txt
+/README_NEW_CHAT.md
+/UPDATE-NOTES.md

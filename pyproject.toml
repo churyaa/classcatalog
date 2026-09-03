@@ -1,0 +1,59 @@
+[project]
+name = "classcatalog"
+version = "0.1.0"
+description = "Typed SDSU class-search MVP with faceted filtering and scraper adapters"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.14,<5",
+  "fastapi>=0.128,<1",
+  "httpx>=0.28,<1",
+  "playwright>=1.50,<2",
+  "pydantic>=2.13,<3",
+  "requests>=2.32,<3",
+  "structlog>=25,<26",
+  "uvicorn[standard]>=0.48,<1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=9,<10",
+  "ruff>=0.14,<1",
+  "ty>=0.0.65,<0.1",
+]
+
+[project.scripts]
+classcatalog-api = "classcatalog.main:run"
+classcatalog-sync-demo = "classcatalog.scraping.sync:main"
+classcatalog-import-schedule = "classcatalog.importers.sdsu_schedule_csv:main"
+classcatalog-scrape-sdsu = "classcatalog.scraping.main:main"
+classcatalog-build-dataset = "classcatalog.dataset.main:main"
+classcatalog-validate-api-data = "classcatalog.api_validation.main:main"
+classcatalog-scrape-catalog = "classcatalog.catalog.main:main"
+classcatalog-validate-frontend = "classcatalog.frontend_validation.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/classcatalog"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ANN", "ASYNC", "RUF"]
+ignore = ["ANN401"]
+
+[tool.ty.src]
+include = ["src", "tests", "scripts"]
+
+[tool.ty.rules]
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"

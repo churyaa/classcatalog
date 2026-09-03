@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Find and compare SDSU classes with useful schedule and professor filters.">
+  <title>ClassCatalog — SDSU class finder</title>
+  <link rel="stylesheet" href="/static/styles.css?v=59">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">CC</div>
+      <div>
+        <p class="eyebrow">SDSU course planning</p>
+        <h1>ClassCatalog</h1>
+      </div>
+    </div>
+    <nav class="header-actions" aria-label="Primary navigation">
+      <a id="favorites-nav" class="header-nav-button" href="#favorites">
+        <span class="header-nav-star" aria-hidden="true">★</span>
+        Favorites
+        <span id="favorites-count" class="header-nav-count">0</span>
+      </a>
+      <a id="home-nav" class="header-nav-button" href="#">
+        <span class="header-nav-home" aria-hidden="true">⌂</span>
+        Home
+      </a>
+      <a id="about-nav" class="header-nav-button" href="#about">
+        <span class="header-nav-info" aria-hidden="true">ⓘ</span>
+        About
+      </a>
+      <a id="admin-nav" class="header-nav-button" href="#admin" hidden>
+        <span class="header-nav-admin" aria-hidden="true">●</span>
+        Admin
+      </a>
+    </nav>
+  </header>
+
+  <div id="service-alerts" class="service-alerts" role="status" aria-live="polite" hidden></div>
+
+  <main id="browse-page">
+    <section class="toolbar" aria-label="Primary class search controls">
+      <div class="term-control">
+        <span class="control-label">Semester</span>
+        <div id="term-buttons" class="segmented" role="group" aria-label="Semester"></div>
+      </div>
+      <label class="search-field">
+        <span class="control-label">Search</span>
+        <input id="query" type="search" placeholder="Course, title, or professor" autocomplete="off">
+      </label>
+      <label class="sort-field">
+        <span class="control-label">Sort by</span>
+        <select id="sort-by">
+          <option value="alphabetical">Course A-Z</option>
+          <option value="alphabetical_desc">Course Z-A</option>
+          <option value="professor_rating_asc">Professor Quality (Low to High)</option>
+          <option value="professor_rating">Professor Quality (High to Low)</option>
+          <option value="professor_difficulty_asc">Professor Difficulty (Low to High)</option>
+          <option value="professor_difficulty">Professor Difficulty (High to Low)</option>
+          <option value="reviews_asc">Number of Reviews (Low to High)</option>
+          <option value="reviews">Number of Reviews (High to Low)</option>
+          <option value="take_again_asc">Take Again Percentage (Low to High)</option>
+          <option value="take_again">Take Again Percentage (High to Low)</option>
+        </select>
+      </label>
+      <div class="result-summary" aria-live="polite">
+        <span id="result-count">—</span>
+        <small id="result-context">loading classes</small>
+        <small id="seat-freshness" class="seat-freshness">Seat refresh starting…</small>
+      </div>
+    </section>
+
+    <div class="layout">
+      <aside class="filters" aria-label="Class filters">
+        <div class="filter-header">
+          <div>
+            <p class="eyebrow">Refine results</p>
+            <h2>Filters</h2>
+          </div>
+          <button id="clear-filters" class="text-button" type="button">Clear</button>
+        </div>
+
+        <details open>
+          <summary>Student profile</summary>
+          <div class="filter-body stack">
+            <label>Major
+              <select id="program"></select>
+            </label>
+            <label>Catalog year
+              <select id="catalog-year"></select>
+            </label>
+            <div class="completed-course-field">
+              <span class="completed-course-label">Completed courses</span>
+              <div id="completed-course-picker" class="completed-course-picker">
+                <div id="completed-course-chips" class="completed-course-chips" aria-live="polite"></div>
+                <div class="completed-course-autocomplete">
+                  <input id="completed-course-input" type="text" placeholder="Type a course code or title" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="completed-course-suggestions" aria-expanded="false" data-no-search>
+                  <div id="completed-course-suggestions" class="completed-course-suggestions" role="listbox" hidden></div>
+                </div>
+                <input id="completed-courses" type="hidden">
+              </div>
+              <span class="completed-course-help">Start typing, then select a course. Click × to remove it.</span>
+            </div>
+            <label class="check-row"><input id="major-only" type="checkbox" checked> Show only courses related to major</label>
+            <div id="catalog-status" class="catalog-status" role="status">
+              <strong>Degree mappings not loaded</strong>
+              <span>Install the public SDSU catalog overlay to activate planning filters.</span>
+            </div>
+            <article id="program-summary" class="program-summary" hidden>
+              <div class="program-summary-heading">
+                <strong id="program-summary-title"></strong>
+                <a id="program-summary-source" href="#" target="_blank" rel="noreferrer">Official catalog</a>
+              </div>
+              <p id="program-summary-counts"></p>
+              <p id="program-summary-remaining"></p>
+            </article>
+            <p class="microcopy">Planning aid only. Non-course conditions, grades, units, residency, and official degree progress still require SDSU degree evaluation and advisor review.</p>
+          </div>
+        </details>
+
+        <details open>
+          <summary>Location</summary>
+          <div id="campuses" class="filter-body check-list"></div>
+        </details>
+
+        <details open>
+          <summary>Seat availability</summary>
+          <div id="seat-statuses" class="filter-body check-list"></div>
+        </details>
+
+        <details open>
+          <summary>Program classification</summary>
+          <div id="classifications" class="filter-body check-list"></div>
+        </details>
+
+        <details open>
+          <summary>Requirements</summary>
+          <div id="requirements" class="filter-body check-list"></div>
+        </details>
+
+        <details open>
+          <summary>Class format</summary>
+          <div id="formats" class="filter-body check-list"></div>
+        </details>
+
+        <details open>
+          <summary>Days and times</summary>
+          <div class="filter-body stack">
+            <div id="days" class="day-grid"></div>
+            <div class="two-col time-filter-grid">
+              <div class="time-filter-control">
+                <div class="time-filter-label-row">
+                  <label for="time-from">Starts after</label>
+                  <button class="time-reset" type="button" data-time-target="time-from" aria-label="Reset Starts after to any time">Reset</button>
+                </div>
+                <input id="time-from" type="time">
+              </div>
+              <div class="time-filter-control">
+                <div class="time-filter-label-row">
+                  <label for="time-to">Ends before</label>
+                  <button class="time-reset" type="button" data-time-target="time-to" aria-label="Reset Ends before to any time">Reset</button>
+                </div>
+                <input id="time-to" type="time">
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>Units and grading</summary>
+          <div class="filter-body stack">
+            <div class="two-col">
+              <label>Min units<input id="units-min" type="number" min="0" max="12" step="0.5"></label>
+              <label>Max units<input id="units-max" type="number" min="0" max="12" step="0.5"></label>
+            </div>
+            <div id="gradings" class="check-list"></div>
+          </div>
+        </details>
+
+        <details>
+          <summary>Professor signals</summary>
+          <div class="filter-body stack">
+            <label>Minimum rating
+              <select id="rating-min">
+                <option value="">Any</option><option value="3">3.0+</option><option value="3.5">3.5+</option><option value="4">4.0+</option><option value="4.5">4.5+</option>
+              </select>
+            </label>
+            <label>Maximum professor difficulty
+              <select id="difficulty-max">
+                <option value="">Any</option><option value="2">2.0 or lower</option><option value="3">3.0 or lower</option><option value="4">4.0 or lower</option>
+              </select>
+            </label>
+            <label>Would take again
+              <select id="would-take-again-min">
+                <option value="">Any</option><option value="60">60%+</option><option value="75">75%+</option><option value="90">90%+</option>
+              </select>
+            </label>
+            <label>Minimum reviews<input id="reviews-min" type="number" min="0" step="1" placeholder="e.g. 20"></label>
+            <label>Attendance
+              <select id="attendance-required">
+                <option value="">Any / unknown</option><option value="false">Reported not mandatory</option><option value="true">Reported mandatory</option>
+              </select>
+            </label>
+            <label>Textbook
+              <select id="textbook-required">
+                <option value="">Any / unknown</option><option value="false">Reported not needed</option><option value="true">Reported needed</option>
+              </select>
+            </label>
+          </div>
+        </details>
+      </aside>
+
+      <section class="results" aria-label="Matching classes">
+        <div class="results-top-row">
+          <div id="active-filters" class="active-filters" aria-live="polite"></div>
+          <div id="top-pagination" class="pagination pagination-top" aria-live="polite" hidden>
+            <p id="top-showing-count" class="pagination-summary"></p>
+            <nav id="top-page-controls" class="page-controls" aria-label="Class result pages at top">
+              <button id="top-previous-page" class="page-button page-nav" type="button">Previous</button>
+              <div id="top-page-buttons" class="page-buttons"></div>
+              <button id="top-next-page" class="page-button page-nav" type="button">Next</button>
+            </nav>
+          </div>
+        </div>
+        <div id="loading" class="loading" hidden>Updating results…</div>
+        <div id="error" class="error" hidden></div>
+        <div id="course-list" class="course-list"></div>
+        <div id="pagination" class="pagination" aria-live="polite" hidden>
+          <p id="showing-count" class="pagination-summary"></p>
+          <nav id="page-controls" class="page-controls" aria-label="Class result pages">
+            <button id="previous-page" class="page-button page-nav" type="button">Previous</button>
+            <div id="page-buttons" class="page-buttons"></div>
+            <button id="next-page" class="page-button page-nav" type="button">Next</button>
+          </nav>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <main id="favorites-page" hidden>
+    <section class="favorites-view" aria-labelledby="favorites-title">
+      <div class="favorites-heading">
+        <div>
+          <p class="eyebrow">Saved classes</p>
+          <h2 id="favorites-title">Favorites</h2>
+          <p>Enrollment options you starred while browsing ClassCatalog.</p>
+        </div>
+      </div>
+      <div id="favorites-empty" class="empty favorites-empty" hidden>
+        <strong>No favorites yet.</strong><br>Use the star next to a class name to save an enrollment option here.
+      </div>
+      <div id="favorites-list" class="course-list"></div>
+    </section>
+  </main>
+
+  <main id="about-page" hidden>
+    <article class="about-view" aria-labelledby="about-title">
+      <header class="about-hero">
+        <p class="eyebrow">About &amp; Privacy</p>
+        <h2 id="about-title">A clearer way to explore SDSU classes</h2>
+        <p>ClassCatalog is an independent planning aid that brings class, schedule, seat, professor, and catalog information into one searchable view. It is not an official SDSU enrollment system and is not affiliated with or endorsed by SDSU or Rate My Professors.</p>
+        <p class="about-updated">Last updated August 25, 2026</p>
+      </header>
+
+      <div class="about-grid">
+        <section class="about-card about-card-wide" aria-labelledby="privacy-title">
+          <div class="about-section-heading">
+            <span class="about-icon" aria-hidden="true">▣</span>
+            <div>
+              <p class="eyebrow">Your browser</p>
+              <h3 id="privacy-title">What ClassCatalog saves</h3>
+            </div>
+          </div>
+          <div class="privacy-table" role="list">
+            <div class="privacy-row" role="listitem">
+              <strong>Selected major</strong>
+              <span>Saved in a first-party cookie for up to one year so your major can be restored on this browser.</span>
+            </div>
+            <div class="privacy-row" role="listitem">
+              <strong>Completed courses</strong>
+              <span>Saved in a first-party cookie for up to one year so completed courses remain excluded on this browser.</span>
+            </div>
+            <div class="privacy-row" role="listitem">
+              <strong>Favorites</strong>
+              <span>Saved in this browser’s local storage until you remove them or clear the site’s browser data.</span>
+            </div>
+          </div>
+          <p class="about-note"><strong>No public user account:</strong> ClassCatalog does not create a student account or profile, and these preferences are not synchronized to another browser or device.</p>
+        </section>
+
+        <section class="about-card" aria-labelledby="requests-title">
+          <div class="about-section-heading">
+            <span class="about-icon" aria-hidden="true">↗</span>
+            <div>
+              <p class="eyebrow">Requests</p>
+              <h3 id="requests-title">What is sent to ClassCatalog</h3>
+            </div>
+          </div>
+          <p>Search terms and selected filters—including major and completed courses when used—are sent to the ClassCatalog server to return matching classes and degree progress.</p>
+          <p>Favorites stay in local storage. When you view Favorites, their class numbers may be sent to ClassCatalog only to retrieve current seat information.</p>
+          <p>None of this information is attached to a public ClassCatalog account.</p>
+        </section>
+
+        <section class="about-card" aria-labelledby="sources-title">
+          <div class="about-section-heading">
+            <span class="about-icon" aria-hidden="true">◎</span>
+            <div>
+              <p class="eyebrow">Attribution</p>
+              <h3 id="sources-title">Where the information comes from</h3>
+            </div>
+          </div>
+          <div class="source-list">
+            <div class="source-item">
+              <strong>SDSU</strong>
+              <p>Class listings, meetings, enrollment details, seat availability, and degree-catalog mappings come from SDSU public sources. Seat data is refreshed periodically and may lag behind my.SDSU.</p>
+              <div class="source-links">
+                <a href="https://my.sdsu.edu/guides/public-schedule" target="_blank" rel="noreferrer noopener">SDSU public schedule guide</a>
+                <a href="https://catalog.sdsu.edu/" target="_blank" rel="noreferrer noopener">Official SDSU catalog</a>
+              </div>
+            </div>
+            <div class="source-item">
+              <strong>Rate My Professors</strong>
+              <p>Professor ratings and related review signals come from cached Rate My Professors data. Community-submitted ratings can be incomplete, subjective, or outdated.</p>
+              <div class="source-links">
+                <a href="https://www.ratemyprofessors.com/school/877" target="_blank" rel="noreferrer noopener">SDSU on Rate My Professors</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="about-card about-card-wide about-verification" aria-labelledby="verify-title">
+          <div class="about-section-heading">
+            <span class="about-icon" aria-hidden="true">✓</span>
+            <div>
+              <p class="eyebrow">Before enrolling</p>
+              <h3 id="verify-title">Always verify official information</h3>
+            </div>
+          </div>
+          <p>Use ClassCatalog to narrow your options, then confirm prerequisites, restrictions, meeting details, degree requirements, and current seat status in official SDSU systems. SDSU’s records control.</p>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <main id="admin-page" hidden>
+    <section class="admin-view" aria-labelledby="admin-title">
+      <div class="admin-heading">
+        <div>
+          <p class="eyebrow">Developer diagnostics</p>
+          <h2 id="admin-title">Data Health</h2>
+          <p>Live health checks for the active class, catalog, grouping, and RateMyProfessors data.</p>
+        </div>
+        <div class="admin-heading-actions">
+          <button id="admin-refresh" class="admin-refresh" type="button" hidden>Refresh</button>
+          <button id="admin-logout" class="admin-refresh admin-logout" type="button" hidden>Log out</button>
+        </div>
+      </div>
+
+      <div id="admin-auth-panel" class="admin-auth-panel" hidden>
+        <div id="admin-login-card" class="admin-login-card">
+          <p class="admin-kicker">Private access</p>
+          <h3>Admin sign in</h3>
+          <p>The data-health dashboard is restricted to the ClassCatalog administrator.</p>
+          <form id="admin-login-form" class="admin-login-form">
+            <label for="admin-password">Admin password</label>
+            <div class="admin-login-row">
+              <input id="admin-password" name="password" type="password" autocomplete="current-password" required>
+              <button id="admin-login" class="admin-refresh" type="submit">Sign in</button>
+            </div>
+          </form>
+          <p id="admin-login-error" class="admin-login-error" hidden></p>
+          <p id="admin-disabled" class="admin-login-error" hidden>Admin access is not configured on this server.</p>
+        </div>
+      </div>
+
+      <div id="admin-loading" class="loading admin-loading" hidden>Refreshing data health…</div>
+      <div id="admin-error" class="error" hidden></div>
+
+      <div id="admin-dashboard" class="admin-dashboard" hidden>
+        <section class="admin-status-card" aria-live="polite">
+          <div>
+            <p class="admin-kicker">Overall status</p>
+            <div class="admin-status-line">
+              <span id="admin-status-dot" class="admin-status-dot"></span>
+              <strong id="admin-status-text">Checking…</strong>
+            </div>
+          </div>
+          <p id="admin-checked-at" class="admin-checked-at"></p>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-seats-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Live SDSU enrollment data</p>
+              <h3 id="admin-seats-title">Seat refresh</h3>
+            </div>
+            <button id="admin-seat-refresh-now" class="admin-refresh" type="button">Refresh Seats Now</button>
+          </div>
+          <form id="admin-seat-refresh-form" class="admin-seat-refresh-form">
+            <label for="admin-seat-course-input">Refresh one course</label>
+            <div class="admin-seat-refresh-row">
+              <div class="admin-seat-course-autocomplete">
+                <input id="admin-seat-course-input" name="course_code" type="text" placeholder="Type a course code or title" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="admin-seat-course-suggestions" aria-expanded="false" required>
+                <div id="admin-seat-course-suggestions" class="completed-course-suggestions" role="listbox" hidden></div>
+              </div>
+              <button id="admin-seat-refresh-course" class="admin-refresh" type="submit">Refresh Course</button>
+            </div>
+            <span class="completed-course-help">Start typing, then select a course such as CS 210.</span>
+            <p id="admin-seat-refresh-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+          </form>
+          <div id="admin-seat-metrics" class="admin-metric-grid"></div>
+          <p id="admin-seat-note" class="admin-note"></p>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-seat-failures-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Retained worker diagnostics</p>
+              <h3 id="admin-seat-failures-title">Seat Refresh Failures</h3>
+            </div>
+            <span id="admin-seat-failure-count" class="admin-health-badge">None</span>
+          </div>
+          <p class="admin-note admin-seat-failure-note">The latest 100 unique failed course pages are retained until the server restarts. Successful retries remain visible as recovered history.</p>
+          <div class="admin-seat-failure-table-wrap">
+            <table class="admin-seat-failure-table">
+              <thead>
+                <tr>
+                  <th scope="col">Course</th>
+                  <th scope="col">Latest failure</th>
+                  <th scope="col">Error</th>
+                  <th scope="col">Occurrences</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="admin-seat-failures"></tbody>
+            </table>
+          </div>
+          <p id="admin-seat-failure-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-coverage-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Enrollment-option coverage</p>
+              <h3 id="admin-coverage-title">Section accounting</h3>
+            </div>
+            <span id="admin-coverage-badge" class="admin-health-badge">—</span>
+          </div>
+          <div id="admin-coverage-metrics" class="admin-metric-grid"></div>
+          <div id="admin-unaccounted" class="admin-warning-list" hidden></div>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-inventory-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Active dataset</p>
+              <h3 id="admin-inventory-title">Inventory</h3>
+            </div>
+          </div>
+          <div id="admin-inventory-metrics" class="admin-metric-grid"></div>
+        </section>
+
+        <div class="admin-two-column">
+          <section class="admin-section" aria-labelledby="admin-rmp-title">
+            <div class="admin-section-heading">
+              <div>
+                <p class="admin-kicker">RateMyProfessors</p>
+                <h3 id="admin-rmp-title">Professor coverage</h3>
+              </div>
+            </div>
+            <div id="admin-rmp-metrics" class="admin-metric-grid admin-metric-grid-compact"></div>
+            <div id="admin-rmp-progress" class="admin-progress" aria-label="RateMyProfessors match rate"><span></span></div>
+            <p id="admin-rmp-sync" class="admin-note"></p>
+          </section>
+
+          <section class="admin-section" aria-labelledby="admin-completeness-title">
+            <div class="admin-section-heading">
+              <div>
+                <p class="admin-kicker">Missing fields</p>
+                <h3 id="admin-completeness-title">Data completeness</h3>
+              </div>
+            </div>
+            <div id="admin-completeness-metrics" class="admin-metric-grid admin-metric-grid-compact"></div>
+          </section>
+        </div>
+
+        <section class="admin-section" aria-labelledby="admin-catalog-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Academic catalog</p>
+              <h3 id="admin-catalog-title">Catalog mappings</h3>
+            </div>
+          </div>
+          <div id="admin-catalog-metrics" class="admin-metric-grid"></div>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-files-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Local sources</p>
+              <h3 id="admin-files-title">Data files</h3>
+            </div>
+          </div>
+          <div id="admin-files" class="admin-file-list"></div>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-errors-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Request diagnostics</p>
+              <h3 id="admin-errors-title">Recent server errors</h3>
+            </div>
+            <span id="admin-recent-error-count" class="admin-health-badge">None</span>
+          </div>
+          <div id="admin-recent-errors" class="admin-error-list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p>Planning aid only. Always verify prerequisites, enrollment rules, meeting details, and seat status with SDSU.</p>
+      <a href="#about">About &amp; Privacy</a>
+    </div>
+  </footer>
+  <script src="/static/app.js?v=59" defer></script>
+</body>
+</html>

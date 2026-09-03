@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "institution": "San Diego State University",
+  "catalog_year": "2026-2027",
+  "catoid": 12,
+  "generated_at": "2026-08-23T00:00:00+00:00",
+  "source_index_url": "https://catalog.sdsu.edu/index.php?catoid=12",
+  "sources": [
+    {
+      "kind": "program",
+      "url": "https://catalog.sdsu.edu/preview_program.php?catoid=12&poid=11846",
+      "title": "Computer Science, B.S.",
+      "fetched_at": null,
+      "fixture_path": null
+    },
+    {
+      "kind": "requirement",
+      "url": "https://catalog.sdsu.edu/content.php?catoid=12&navoid=example",
+      "title": "General Education and Graduation Requirements",
+      "fetched_at": null,
+      "fixture_path": null
+    }
+  ],
+  "programs": [
+    {
+      "name": "Computer Science, B.S.",
+      "catalog_year": "2026-2027",
+      "source_url": "https://catalog.sdsu.edu/preview_program.php?catoid=12&poid=11846",
+      "department_url": "https://cs.sdsu.edu/computer-science-degree-programs/",
+      "degree_type": "B.S.",
+      "mappings": [
+        {
+          "course_code": "CS 470",
+          "classification": "elective",
+          "group": "Upper-Division Electives",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=6",
+          "notes": []
+        },
+        {
+          "course_code": "CS 480",
+          "classification": "elective",
+          "group": "Upper-Division Electives",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=7",
+          "notes": []
+        },
+        {
+          "course_code": "CS 210",
+          "classification": "major_course",
+          "group": "Major Requirements",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=4",
+          "notes": []
+        },
+        {
+          "course_code": "CS 240",
+          "classification": "major_course",
+          "group": "Major Requirements",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=5",
+          "notes": []
+        },
+        {
+          "course_code": "CS 150",
+          "classification": "major_prep",
+          "group": "Preparation for the Major",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=1",
+          "notes": []
+        },
+        {
+          "course_code": "CS 160",
+          "classification": "major_prep",
+          "group": "Preparation for the Major",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=2",
+          "notes": []
+        },
+        {
+          "course_code": "MATH 150",
+          "classification": "major_prep",
+          "group": "Preparation for the Major",
+          "source_url": "https://catalog.sdsu.edu/preview_course_nopop.php?catoid=12&coid=3",
+          "notes": []
+        }
+      ],
+      "unmapped_course_codes": [
+        "COMM 103"
+      ],
+      "warnings": [
+        "1 course codes were present but could not be assigned to major preparation, major course, or elective without guessing."
+      ],
+      "mapped_course_count": 7
+    }
+  ],
+  "requirements": [
+    {
+      "code": "AI",
+      "name": "American Institutions",
+      "catalog_year": "2026-2027",
+      "source_url": "https://catalog.sdsu.edu/content.php?catoid=12&navoid=example",
+      "course_codes": [
+        "HIST 109"
+      ],
+      "notes": [],
+      "display_name": "AI: American Institutions"
+    },
+    {
+      "code": "GE 2",
+      "name": "Mathematical Concepts and Quantitative Reasoning",
+      "catalog_year": "2026-2027",
+      "source_url": "https://catalog.sdsu.edu/content.php?catoid=12&navoid=example",
+      "course_codes": [
+        "MATH 120",
+        "MATH 150"
+      ],
+      "notes": [],
+      "display_name": "GE 2: Mathematical Concepts and Quantitative Reasoning"
+    },
+    {
+      "code": "GE A1",
+      "name": "Oral Communication",
+      "catalog_year": "2026-2027",
+      "source_url": "https://catalog.sdsu.edu/content.php?catoid=12&navoid=example",
+      "course_codes": [
+        "COMM 103"
+      ],
+      "notes": [],
+      "display_name": "GE A1: Oral Communication"
+    },
+    {
+      "code": "GE A3",
+      "name": "Critical Thinking",
+      "catalog_year": "2026-2027",
+      "source_url": "https://catalog.sdsu.edu/content.php?catoid=12&navoid=example",
+      "course_codes": [
+        "RWS 200"
+      ],
+      "notes": [],
+      "display_name": "GE A3: Critical Thinking"
+    }
+  ],
+  "warnings": [
+    "Example fixture only; do not use as a complete production catalog overlay."
+  ]
+}
