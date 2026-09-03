@@ -197,6 +197,294 @@
   color-scheme: dark;
 }
 
+:root[data-theme="ishtar"] {
+  --theme-background: #202020;
+  --theme-accent: #91170c;
+  --theme-text: #fae1c3;
+  --theme-ui: #847869;
+  color-scheme: dark;
+}
+
+:root[data-theme="joker"] {
+  --theme-background: #1a0e25;
+  --theme-accent: #99de1e;
+  --theme-text: #e9e2f5;
+  --theme-ui: #7554a3;
+  color-scheme: dark;
+}
+
+:root[data-theme="laser"] {
+  --theme-background: #221b44;
+  --theme-accent: #009eaf;
+  --theme-text: #dbe7e8;
+  --theme-ui: #b82356;
+  color-scheme: dark;
+}
+
+:root[data-theme="luna"] {
+  --theme-background: #221c35;
+  --theme-accent: #f67599;
+  --theme-text: #ffe3eb;
+  --theme-ui: #5a3a7e;
+  color-scheme: dark;
+}
+
+:root[data-theme="mashu"] {
+  --theme-background: #2b2b2c;
+  --theme-accent: #76689a;
+  --theme-text: #f1e2e4;
+  --theme-ui: #d8a0a6;
+  color-scheme: dark;
+}
+
+:root[data-theme="matcha-moccha"] {
+  --theme-background: #523525;
+  --theme-accent: #7ec160;
+  --theme-text: #ecddcc;
+  --theme-ui: #9e6749;
+  color-scheme: dark;
+}
+
+:root[data-theme="matrix"] {
+  --theme-background: #000000;
+  --theme-accent: #15ff00;
+  --theme-text: #d1ffcd;
+  --theme-ui: #006500;
+  color-scheme: dark;
+}
+
+:root[data-theme="metaverse"] {
+  --theme-background: #232323;
+  --theme-accent: #d82934;
+  --theme-text: #e8e8e8;
+  --theme-ui: #5e5e5e;
+  color-scheme: dark;
+}
+
+:root[data-theme="miami-nights"] {
+  --theme-background: #18181a;
+  --theme-accent: #e4609b;
+  --theme-text: #ffffff;
+  --theme-ui: #47bac0;
+  color-scheme: dark;
+}
+
+:root[data-theme="mint"] {
+  --theme-background: #05385b;
+  --theme-accent: #5cdb95;
+  --theme-text: #edf5e1;
+  --theme-ui: #20688a;
+  color-scheme: dark;
+}
+
+:root[data-theme="monokai"] {
+  --theme-background: #272822;
+  --theme-accent: #a6e22e;
+  --theme-text: #e2e2dc;
+  --theme-ui: #e6db74;
+  color-scheme: dark;
+}
+
+:root[data-theme="mountain"] {
+  --theme-background: #0f0f0f;
+  --theme-accent: #e7e7e7;
+  --theme-text: #e7e7e7;
+  --theme-ui: #4c4c4c;
+  color-scheme: dark;
+}
+
+:root[data-theme="nautilus"] {
+  --theme-background: #132237;
+  --theme-accent: #ebb723;
+  --theme-text: #1cbaac;
+  --theme-ui: #0b4c6c;
+  color-scheme: dark;
+}
+
+:root[data-theme="nebula"] {
+  --theme-background: #212135;
+  --theme-accent: #be3c88;
+  --theme-text: #838686;
+  --theme-ui: #19b3b8;
+  color-scheme: dark;
+}
+
+:root[data-theme="night-runner"] {
+  --theme-background: #212121;
+  --theme-accent: #feff04;
+  --theme-text: #e8e8e8;
+  --theme-ui: #5c4a9c;
+  color-scheme: dark;
+}
+
+:root[data-theme="our-theme"] {
+  --theme-background: #ce1226;
+  --theme-accent: #fcd116;
+  --theme-text: #ffffff;
+  --theme-ui: #6d0f19;
+  color-scheme: dark;
+}
+
+:root[data-theme="passion-fruit"] {
+  --theme-background: #7c2142;
+  --theme-accent: #f4a3b4;
+  --theme-text: #ffffff;
+  --theme-ui: #9994b8;
+  color-scheme: dark;
+}
+
+:root[data-theme="red-dragon"] {
+  --theme-background: #1a0b0c;
+  --theme-accent: #ff3a32;
+  --theme-text: #4a4d4e;
+  --theme-ui: #e2a528;
+  color-scheme: dark;
+}
+
+:root[data-theme="red-samurai"] {
+  --theme-background: #84202c;
+  --theme-accent: #c79e6e;
+  --theme-text: #e2dad0;
+  --theme-ui: #55131b;
+  color-scheme: dark;
+}
+
+:root[data-theme="rgb"] {
+  --theme-background: #111111;
+  --theme-accent: #eeeeee;
+  --theme-text: #eeeeee;
+  --theme-ui: #444444;
+  color-scheme: dark;
+}
+
+:root[data-theme="rose-pine"] {
+  --theme-background: #1f1d27;
+  --theme-accent: #9ccfd8;
+  --theme-text: #e0def4;
+  --theme-ui: #c4a7e7;
+  color-scheme: dark;
+}
+
+:root[data-theme="rose-pine-moon"] {
+  --theme-background: #2a273f;
+  --theme-accent: #9ccfd8;
+  --theme-text: #e0def4;
+  --theme-ui: #c4a7e7;
+  color-scheme: dark;
+}
+
+:root[data-theme="ryujinscales"] {
+  --theme-background: #081426;
+  --theme-accent: #f17754;
+  --theme-text: #ffe4bc;
+  --theme-ui: #ffbc90;
+  color-scheme: dark;
+}
+
+:root[data-theme="sewing-tin"] {
+  --theme-background: #241963;
+  --theme-accent: #f2ce83;
+  --theme-text: #ffffff;
+  --theme-ui: #446ad5;
+  color-scheme: dark;
+}
+
+:root[data-theme="shadow"] {
+  --theme-background: #000000;
+  --theme-accent: #eeeeee;
+  --theme-text: #eeeeee;
+  --theme-ui: #444444;
+  color-scheme: dark;
+}
+
+:root[data-theme="solarized-dark"] {
+  --theme-background: #002b36;
+  --theme-accent: #859900;
+  --theme-text: #268bd2;
+  --theme-ui: #2aa198;
+  color-scheme: dark;
+}
+
+:root[data-theme="sonokai"] {
+  --theme-background: #2c2e34;
+  --theme-accent: #9ed072;
+  --theme-text: #e2e2e3;
+  --theme-ui: #e7c664;
+  color-scheme: dark;
+}
+
+:root[data-theme="superuser"] {
+  --theme-background: #262a33;
+  --theme-accent: #43ffaf;
+  --theme-text: #e5f7ef;
+  --theme-ui: #526777;
+  color-scheme: dark;
+}
+
+:root[data-theme="trance"] {
+  --theme-background: #00021b;
+  --theme-accent: #e51376;
+  --theme-text: #ffffff;
+  --theme-ui: #3c4c79;
+  color-scheme: dark;
+}
+
+:root[data-theme="tron-orange"] {
+  --theme-background: #0d1c1c;
+  --theme-accent: #f0e800;
+  --theme-text: #ffffff;
+  --theme-ui: #ff6600;
+  color-scheme: dark;
+}
+
+:root[data-theme="voc"] {
+  --theme-background: #190618;
+  --theme-accent: #e0caac;
+  --theme-text: #eeeae4;
+  --theme-ui: #4c1e48;
+  color-scheme: dark;
+}
+
+:root[data-theme="watermelon"] {
+  --theme-background: #1f4437;
+  --theme-accent: #d6686f;
+  --theme-text: #cdc6bc;
+  --theme-ui: #3e7a65;
+  color-scheme: dark;
+}
+
+:root[data-theme="wavez"] {
+  --theme-background: #1c292f;
+  --theme-accent: #6bde3b;
+  --theme-text: #e9efe6;
+  --theme-ui: #1f5e6b;
+  color-scheme: dark;
+}
+
+:root[data-theme="8008"] {
+  --theme-background: #333a45;
+  --theme-accent: #f44c7f;
+  --theme-text: #e9ecf0;
+  --theme-ui: #939eae;
+  color-scheme: dark;
+}
+
+:root[data-theme="9009"] {
+  --theme-background: #eeebe2;
+  --theme-accent: #080909;
+  --theme-text: #080909;
+  --theme-ui: #99947f;
+  color-scheme: light;
+}
+
+:root[data-theme="alduin"] {
+  --theme-background: #1c1c1c;
+  --theme-accent: #dfd7af;
+  --theme-text: #f5f3ed;
+  --theme-ui: #444444;
+  color-scheme: dark;
+}
+
 :root[data-theme="after-dark"] {
   --theme-background: #1f2238;
   --theme-accent: #73c9ff;
