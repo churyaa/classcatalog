@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from classcatalog.ratings import (
     InstructorTarget,
+    RatingsCacheEditor,
     RmpCandidate,
     canonical_instructor_name,
     normalize_person_name,
+    parse_rmp_profile_id,
     select_candidate,
     sync_rate_my_professors,
 )
 from classcatalog.repository import CourseRepository
-
 
 ROOT = Path(__file__).parents[1]
 SAMPLE_DATA = ROOT / "src" / "classcatalog" / "data" / "sample_sections.json"
@@ -43,6 +46,33 @@ def candidate(
 def test_instructor_name_normalization_handles_last_first_format() -> None:
     assert canonical_instructor_name("Thompson, Renee") == "Renee Thompson"
     assert normalize_person_name("Jesús Ayala-Candia") == "jesus ayala candia"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("123456", 123456),
+        ("https://www.ratemyprofessors.com/professor/123456", 123456),
+        ("https://ratemyprofessors.com/professor/123456/?utm_source=test", 123456),
+    ),
+)
+def test_rmp_profile_id_accepts_numeric_ids_and_profile_urls(value: str, expected: int) -> None:
+    assert parse_rmp_profile_id(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "",
+        "0",
+        "https://example.com/professor/123456",
+        "https://www.ratemyprofessors.com/school/877",
+        "https://www.ratemyprofessors.com/professor/not-a-number",
+    ),
+)
+def test_rmp_profile_id_rejects_invalid_or_non_rmp_values(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_rmp_profile_id(value)
 
 
 def test_exact_rmp_name_match_is_preferred() -> None:
@@ -171,6 +201,129 @@ def test_repository_overlays_cached_rmp_metrics(tmp_path: Path) -> None:
     assert section.professor.would_take_again_percent == 98.0
     assert section.professor.num_reviews == 77
     assert section.professor.profile_url == "https://www.ratemyprofessors.com/professor/123456"
+
+
+def test_ratings_cache_editor_persists_and_removes_manual_matches(tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    ratings_path.write_text(
+        json.dumps(
+            {
+                "provider": "RateMyProfessors",
+                "summary": {"instructors": 2, "matched": 1, "unmatched": 1, "errors": 0},
+                "records": [
+                    {
+                        "name": "Existing Professor",
+                        "normalized_name": "existing professor",
+                        "metrics": candidate(
+                            "Existing Professor",
+                            legacy_id=99,
+                            node_id="existing",
+                        ).metrics(1.0).model_dump(mode="json"),
+                    }
+                ],
+                "unmatched": [
+                    {
+                        "name": "Maya Chen",
+                        "normalized_name": "maya chen",
+                        "course_codes": ["CS150", "CS210"],
+                        "reason": "no_name_match",
+                    }
+                ],
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    editor = RatingsCacheEditor(ratings_path)
+
+    saved = editor.upsert(
+        instructor_name="Maya Chen",
+        course_codes=("CS 150", "CS 210"),
+        candidate=candidate(
+            "May Chen",
+            legacy_id=123456,
+            node_id="maya",
+            rating=4.8,
+            reviews=55,
+        ),
+    )
+
+    assert saved["match_source"] == "admin_override"
+    document = json.loads(ratings_path.read_text(encoding="utf-8"))
+    records = {record["normalized_name"]: record for record in document["records"]}
+    assert set(records) == {"existing professor", "maya chen"}
+    assert records["maya chen"]["rmp_name"] == "May Chen"
+    assert records["maya chen"]["metrics"]["external_id"] == "123456"
+    assert document["unmatched"] == []
+    assert document["summary"]["matched"] == 2
+    assert document["summary"]["manual_overrides"] == 1
+    assert len(editor.manual_overrides()) == 1
+
+    removed = editor.delete("Maya Chen")
+
+    assert removed is not None
+    document = json.loads(ratings_path.read_text(encoding="utf-8"))
+    assert [record["normalized_name"] for record in document["records"]] == [
+        "existing professor"
+    ]
+    assert document["unmatched"][0]["normalized_name"] == "maya chen"
+    assert document["summary"]["matched"] == 1
+    assert document["summary"]["unmatched"] == 1
+    assert document["summary"]["manual_overrides"] == 0
+
+
+def test_repository_can_reload_ratings_after_admin_edit(tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    source_sections = CourseRepository.from_json(SAMPLE_DATA, ratings_path=ratings_path).sections
+    repository = CourseRepository(
+        tuple(
+            section.model_copy(update={"professor": None})
+            if section.instructor == "Maya Chen"
+            else section
+            for section in source_sections
+        )
+    )
+    assert next(item for item in repository.sections if item.instructor == "Maya Chen").professor is None
+
+    RatingsCacheEditor(ratings_path).upsert(
+        instructor_name="Maya Chen",
+        course_codes=("CS 150", "CS 210"),
+        candidate=candidate("May Chen", legacy_id=123456, node_id="maya"),
+    )
+    changed = repository.reload_ratings(ratings_path)
+
+    assert changed == 2
+    assert repository.ratings_record_count == 1
+    maya_sections = [item for item in repository.sections if item.instructor == "Maya Chen"]
+    assert {item.professor.external_id for item in maya_sections if item.professor} == {"123456"}
+
+
+@pytest.mark.parametrize("names", (None, ("Maya Chen",)))
+def test_sync_refresh_preserves_admin_override(
+    tmp_path: Path,
+    names: tuple[str, ...] | None,
+) -> None:
+    output = tmp_path / "professor_ratings.json"
+    RatingsCacheEditor(output).upsert(
+        instructor_name="Maya Chen",
+        course_codes=("CS 150", "CS 210"),
+        candidate=candidate("May Chen", legacy_id=123456, node_id="maya"),
+    )
+
+    exit_code = sync_rate_my_professors(
+        sections_path=SAMPLE_DATA,
+        output_path=output,
+        delay_seconds=0,
+        refresh=True,
+        names=names,
+        client=FakeRmpClient(),
+    )
+
+    assert exit_code == 0
+    document = json.loads(output.read_text(encoding="utf-8"))
+    records = {record["normalized_name"]: record for record in document["records"]}
+    assert records["maya chen"]["match_source"] == "admin_override"
+    assert records["maya chen"]["metrics"]["external_id"] == "123456"
 
 
 class FakeRmpClient:

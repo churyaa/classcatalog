@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Find and compare SDSU classes with useful schedule and professor filters.">
   <title>ClassCatalog — SDSU class finder</title>
-  <link rel="stylesheet" href="/static/styles.css?v=59">
+  <link rel="stylesheet" href="/static/styles.css?v=60">
 </head>
 <body>
   <header class="site-header">
@@ -486,6 +486,49 @@
           </section>
         </div>
 
+        <section class="admin-section" aria-labelledby="admin-professor-overrides-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Manual identity corrections</p>
+              <h3 id="admin-professor-overrides-title">Professor match overrides</h3>
+            </div>
+            <span id="admin-professor-override-count" class="admin-health-badge">None</span>
+          </div>
+          <p class="admin-note admin-professor-override-note">Link an unmatched SDSU instructor name to the correct RateMyProfessors profile. Paste the complete profile URL or its numeric professor ID. Saved matches are written to the private ratings cache and applied immediately.</p>
+          <form id="admin-professor-override-form" class="admin-professor-override-form">
+            <div class="admin-professor-override-fields">
+              <label for="admin-professor-instructor-input">
+                SDSU instructor
+                <span class="admin-professor-autocomplete">
+                  <input id="admin-professor-instructor-input" name="instructor_name" type="text" placeholder="Type an unmatched instructor name" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="admin-professor-instructor-suggestions" aria-expanded="false" data-no-search required>
+                  <span id="admin-professor-instructor-suggestions" class="completed-course-suggestions" role="listbox" hidden></span>
+                </span>
+              </label>
+              <label for="admin-professor-profile-input">
+                RateMyProfessors profile URL or ID
+                <input id="admin-professor-profile-input" name="rmp_profile" type="text" placeholder="https://www.ratemyprofessors.com/professor/123456" autocomplete="off" data-no-search required>
+              </label>
+              <button id="admin-professor-override-save" class="admin-refresh" type="submit">Save Match</button>
+            </div>
+            <span class="completed-course-help">Only choose a profile after verifying the professor’s school and identity on RateMyProfessors.</span>
+            <p id="admin-professor-override-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+          </form>
+          <div class="admin-professor-override-table-wrap">
+            <table class="admin-professor-override-table">
+              <thead>
+                <tr>
+                  <th scope="col">SDSU instructor</th>
+                  <th scope="col">RateMyProfessors profile</th>
+                  <th scope="col">Current metrics</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="admin-professor-overrides"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="admin-section" aria-labelledby="admin-catalog-title">
           <div class="admin-section-heading">
             <div>
@@ -526,6 +569,6 @@
       <a href="#about">About &amp; Privacy</a>
     </div>
   </footer>
-  <script src="/static/app.js?v=59" defer></script>
+  <script src="/static/app.js?v=60" defer></script>
 </body>
 </html>

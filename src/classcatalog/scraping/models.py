@@ -335,3 +335,4 @@ class ScrapeCheckpoint(BaseModel):
     output_path: str
     subject_output_dir: str
     subjects: tuple[SubjectCheckpointState, ...]
+

@@ -13,6 +13,8 @@ const state = {
   completedCourseSuggestionIndex: -1,
   adminSeatCourseSuggestions: [],
   adminSeatCourseSuggestionIndex: -1,
+  adminProfessorSuggestions: [],
+  adminProfessorSuggestionIndex: -1,
   adminHealth: null,
   adminEnabled: false,
   adminAuthenticated: false,
@@ -482,6 +484,56 @@ function matchingAdminSeatCourseOptions(query) {
     (state.adminHealth?.seat_refresh?.refreshable_course_codes || []).map(normalizeCourseCode),
   );
   return matchingCourseOptions(query, new Set(), refreshableCodes);
+}
+
+function normalizeProfessorName(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function adminProfessorEditableOptions() {
+  const professors = state.adminHealth?.professors || {};
+  const unmatched = Array.isArray(professors.unmatched_instructors)
+    ? professors.unmatched_instructors
+    : [];
+  const overrides = Array.isArray(professors.manual_overrides)
+    ? professors.manual_overrides.map((record) => ({
+        name: record.name,
+        normalized_name: record.normalized_name,
+        course_codes: record.course_codes || [],
+        manual_override: true,
+      }))
+    : [];
+  const unique = new Map();
+  [...unmatched, ...overrides].forEach((item) => {
+    const key = normalizeProfessorName(item.normalized_name || item.name);
+    if (key) unique.set(key, item);
+  });
+  return [...unique.values()];
+}
+
+function matchingAdminProfessorOptions(query) {
+  const needle = normalizeProfessorName(query);
+  if (!needle) return [];
+  return adminProfessorEditableOptions()
+    .map((item) => {
+      const name = normalizeProfessorName(item.name);
+      const courses = (item.course_codes || []).join(" ").toLowerCase();
+      let score = 99;
+      if (name.startsWith(needle)) score = 0;
+      else if (name.includes(needle)) score = 1;
+      else if (courses.includes(needle)) score = 2;
+      return { item, score };
+    })
+    .filter(({ score }) => score < 99)
+    .sort((left, right) => left.score - right.score || String(left.item.name).localeCompare(String(right.item.name)))
+    .slice(0, 8)
+    .map(({ item }) => item);
 }
 
 function updateCompletedCourseSuggestionHighlight() {
@@ -1263,6 +1315,74 @@ function adminMetric(label, value, { tone = "", note = "" } = {}) {
   </div>`;
 }
 
+function renderAdminProfessorOverrides(professors) {
+  const overrides = Array.isArray(professors.manual_overrides)
+    ? professors.manual_overrides
+    : [];
+  const badge = document.querySelector("#admin-professor-override-count");
+  if (badge) {
+    badge.textContent = overrides.length
+      ? `${adminNumber(overrides.length)} saved`
+      : "None";
+    badge.className = `admin-health-badge ${overrides.length ? "is-good" : ""}`;
+  }
+
+  const available = Boolean(professors.manual_matching_enabled)
+    && !professors.manual_matching_error;
+  const instructorInput = document.querySelector("#admin-professor-instructor-input");
+  const profileInput = document.querySelector("#admin-professor-profile-input");
+  const saveButton = document.querySelector("#admin-professor-override-save");
+  [instructorInput, profileInput, saveButton].forEach((control) => {
+    if (control) control.disabled = !available;
+  });
+  const result = document.querySelector("#admin-professor-override-result");
+  if (!available && result) {
+    result.textContent = professors.manual_matching_error
+      ? "The professor ratings cache could not be read safely."
+      : "Configure the professor ratings cache before adding manual matches.";
+    result.className = "admin-seat-refresh-result is-error";
+  }
+
+  const table = document.querySelector("#admin-professor-overrides");
+  if (!table) return;
+  table.innerHTML = overrides.length
+    ? overrides.map((record) => {
+        const metrics = record.metrics || {};
+        const profileUrl = metrics.profile_url || "";
+        const profileLabel = record.rmp_name || `Professor ${metrics.external_id || ""}`;
+        const profile = profileUrl
+          ? `<a href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(profileLabel)} ↗</a>`
+          : escapeHtml(profileLabel);
+        const rating = metrics.rating == null ? "—" : Number(metrics.rating).toFixed(1);
+        const difficulty = metrics.difficulty == null ? "—" : Number(metrics.difficulty).toFixed(1);
+        const reviews = adminNumber(metrics.num_reviews || 0);
+        return `<tr>
+          <td><strong>${escapeHtml(record.name || "Unknown instructor")}</strong><span>${escapeHtml((record.course_codes || []).join(", ") || "No active course")}</span></td>
+          <td>${profile}<span>${escapeHtml(record.rmp_department || "Department unavailable")}</span></td>
+          <td>${escapeHtml(`${rating} quality · ${difficulty} difficulty · ${reviews} reviews`)}</td>
+          <td>${escapeHtml(adminDate(record.updated_at || record.created_at))}</td>
+          <td><div class="admin-professor-override-actions">
+            <button class="admin-refresh" type="button" data-edit-professor="${escapeHtml(record.name || "")}" data-edit-profile="${escapeHtml(profileUrl || metrics.external_id || "")}">Change</button>
+            <button class="admin-refresh admin-professor-override-remove" type="button" data-delete-professor="${escapeHtml(record.name || "")}">Remove</button>
+          </div></td>
+        </tr>`;
+      }).join("")
+    : '<tr><td class="admin-seat-failure-empty" colspan="5">No manual professor matches have been saved.</td></tr>';
+
+  table.querySelectorAll("[data-edit-professor]").forEach((button) => {
+    button.addEventListener("click", () => editAdminProfessorOverride(
+      button.dataset.editProfessor,
+      button.dataset.editProfile,
+    ));
+  });
+  table.querySelectorAll("[data-delete-professor]").forEach((button) => {
+    button.addEventListener("click", () => deleteAdminProfessorOverride(
+      button.dataset.deleteProfessor,
+      button,
+    ));
+  });
+}
+
 function renderAdminHealth(data) {
   state.adminHealth = data;
   const dashboard = document.querySelector("#admin-dashboard");
@@ -1415,6 +1535,7 @@ function renderAdminHealth(data) {
       ? `Last sync ${adminDate(sync.generated_at)} · ${adminNumber(sync.matched)} matched · ${adminNumber(sync.unmatched)} unmatched · ${adminNumber(sync.errors)} errors`
       : "No RateMyProfessors sync metadata available.";
   }
+  renderAdminProfessorOverrides(professors);
 
   const completeness = data?.completeness || {};
   const completenessMetrics = document.querySelector("#admin-completeness-metrics");
@@ -1600,6 +1721,203 @@ function setupAdminSeatCoursePicker() {
   input.addEventListener("focus", renderAdminSeatCourseSuggestions);
   input.addEventListener("keydown", handleAdminSeatCourseKeydown);
   input.addEventListener("blur", () => window.setTimeout(closeAdminSeatCourseSuggestions, 120));
+}
+
+function closeAdminProfessorSuggestions() {
+  const box = document.querySelector("#admin-professor-instructor-suggestions");
+  const input = document.querySelector("#admin-professor-instructor-input");
+  if (!box || !input) return;
+  box.hidden = true;
+  box.replaceChildren();
+  input.setAttribute("aria-expanded", "false");
+  input.removeAttribute("aria-activedescendant");
+  state.adminProfessorSuggestions = [];
+  state.adminProfessorSuggestionIndex = -1;
+}
+
+function updateAdminProfessorSuggestionHighlight() {
+  const box = document.querySelector("#admin-professor-instructor-suggestions");
+  const input = document.querySelector("#admin-professor-instructor-input");
+  if (!box || !input) return;
+  [...box.querySelectorAll(".completed-course-suggestion")].forEach((button, index) => {
+    const active = index === state.adminProfessorSuggestionIndex;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+    if (active) input.setAttribute("aria-activedescendant", button.id);
+  });
+  if (state.adminProfessorSuggestionIndex < 0) {
+    input.removeAttribute("aria-activedescendant");
+  }
+}
+
+function selectAdminProfessor(item) {
+  const input = document.querySelector("#admin-professor-instructor-input");
+  if (!input || !item) return;
+  input.value = item.name || "";
+  closeAdminProfessorSuggestions();
+}
+
+function renderAdminProfessorSuggestions() {
+  const input = document.querySelector("#admin-professor-instructor-input");
+  const box = document.querySelector("#admin-professor-instructor-suggestions");
+  if (!input || !box) return;
+  const matches = matchingAdminProfessorOptions(input.value);
+  state.adminProfessorSuggestions = matches;
+  state.adminProfessorSuggestionIndex = matches.length ? 0 : -1;
+  box.replaceChildren();
+  if (!matches.length) {
+    closeAdminProfessorSuggestions();
+    return;
+  }
+  matches.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "completed-course-suggestion";
+    button.id = `admin-professor-option-${index}`;
+    button.setAttribute("role", "option");
+    const name = document.createElement("strong");
+    name.textContent = item.name || "Unknown instructor";
+    const detail = document.createElement("span");
+    const courses = (item.course_codes || []).join(", ") || "No active course";
+    detail.textContent = item.manual_override ? `${courses} · Current manual match` : courses;
+    button.append(name, detail);
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => {
+      selectAdminProfessor(item);
+      input.focus();
+    });
+    box.appendChild(button);
+  });
+  box.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  updateAdminProfessorSuggestionHighlight();
+}
+
+function handleAdminProfessorKeydown(event) {
+  const suggestions = state.adminProfessorSuggestions;
+  if (event.key === "ArrowDown" && suggestions.length) {
+    event.preventDefault();
+    state.adminProfessorSuggestionIndex = (state.adminProfessorSuggestionIndex + 1) % suggestions.length;
+    updateAdminProfessorSuggestionHighlight();
+    return;
+  }
+  if (event.key === "ArrowUp" && suggestions.length) {
+    event.preventDefault();
+    state.adminProfessorSuggestionIndex = (state.adminProfessorSuggestionIndex - 1 + suggestions.length) % suggestions.length;
+    updateAdminProfessorSuggestionHighlight();
+    return;
+  }
+  if (event.key === "Escape") {
+    closeAdminProfessorSuggestions();
+    return;
+  }
+  if (event.key !== "Enter" || !suggestions.length) return;
+  event.preventDefault();
+  selectAdminProfessor(
+    suggestions[state.adminProfessorSuggestionIndex] || suggestions[0],
+  );
+}
+
+function setupAdminProfessorPicker() {
+  const input = document.querySelector("#admin-professor-instructor-input");
+  if (!input) return;
+  input.addEventListener("input", renderAdminProfessorSuggestions);
+  input.addEventListener("focus", renderAdminProfessorSuggestions);
+  input.addEventListener("keydown", handleAdminProfessorKeydown);
+  input.addEventListener("blur", () => window.setTimeout(closeAdminProfessorSuggestions, 120));
+}
+
+function editAdminProfessorOverride(instructorName, profile) {
+  const instructorInput = document.querySelector("#admin-professor-instructor-input");
+  const profileInput = document.querySelector("#admin-professor-profile-input");
+  if (!instructorInput || !profileInput) return;
+  instructorInput.value = instructorName || "";
+  profileInput.value = profile || "";
+  closeAdminProfessorSuggestions();
+  document.querySelector("#admin-professor-override-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  profileInput.focus();
+  profileInput.select();
+}
+
+async function saveAdminProfessorOverride(event) {
+  event.preventDefault();
+  const instructorInput = document.querySelector("#admin-professor-instructor-input");
+  const profileInput = document.querySelector("#admin-professor-profile-input");
+  const button = document.querySelector("#admin-professor-override-save");
+  const result = document.querySelector("#admin-professor-override-result");
+  if (!instructorInput || !profileInput || !button) return;
+
+  const selected = adminProfessorEditableOptions().find(
+    (item) => normalizeProfessorName(item.name) === normalizeProfessorName(instructorInput.value),
+  );
+  if (!selected) {
+    if (result) {
+      result.textContent = "Select an unmatched instructor from the suggestions.";
+      result.className = "admin-seat-refresh-result is-error";
+    }
+    return;
+  }
+
+  closeAdminProfessorSuggestions();
+  button.disabled = true;
+  if (result) {
+    result.textContent = `Checking the RateMyProfessors profile for ${selected.name}…`;
+    result.className = "admin-seat-refresh-result";
+  }
+  try {
+    const payload = await fetchJson("/api/admin/professors/overrides", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instructor_name: selected.name,
+        rmp_profile: profileInput.value.trim(),
+      }),
+    }, { fallbackMessage: "Professor match could not be saved.", allowDetail: true });
+    const record = payload.override || {};
+    const metrics = record.metrics || {};
+    if (result) {
+      const rating = metrics.rating == null ? "no rating yet" : `${Number(metrics.rating).toFixed(1)}/5`;
+      result.textContent = `Saved ${record.name || selected.name} → ${record.rmp_name || "RateMyProfessors profile"} (${rating}, ${adminNumber(metrics.num_reviews || 0)} reviews).`;
+      result.className = "admin-seat-refresh-result is-success";
+    }
+    instructorInput.value = "";
+    profileInput.value = "";
+    await loadAdminHealth();
+  } catch (err) {
+    if (result) {
+      result.textContent = safeErrorMessage(err, "Professor match could not be saved.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteAdminProfessorOverride(instructorName, button) {
+  if (!instructorName || !button) return;
+  if (!window.confirm(`Remove the manual RateMyProfessors match for ${instructorName}?`)) return;
+  const result = document.querySelector("#admin-professor-override-result");
+  button.disabled = true;
+  try {
+    const params = new URLSearchParams({ instructor_name: instructorName });
+    await fetchJson(`/api/admin/professors/overrides?${params.toString()}`, {
+      method: "DELETE",
+      cache: "no-store",
+    }, { fallbackMessage: "Professor match could not be removed.", allowDetail: true });
+    if (result) {
+      result.textContent = `Removed the manual match for ${instructorName}.`;
+      result.className = "admin-seat-refresh-result is-success";
+    }
+    await loadAdminHealth();
+  } catch (err) {
+    if (result) {
+      result.textContent = safeErrorMessage(err, "Professor match could not be removed.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
 }
 
 async function refreshSpecificCourseSeats(event) {
@@ -2142,6 +2460,9 @@ async function boot() {
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
   setupAdminSeatCoursePicker();
+  const adminProfessorOverrideForm = document.querySelector("#admin-professor-override-form");
+  if (adminProfessorOverrideForm) adminProfessorOverrideForm.addEventListener("submit", saveAdminProfessorOverride);
+  setupAdminProfessorPicker();
   const adminLoginForm = document.querySelector("#admin-login-form");
   if (adminLoginForm) adminLoginForm.addEventListener("submit", submitAdminLogin);
   const adminLogout = document.querySelector("#admin-logout");

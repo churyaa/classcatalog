@@ -689,3 +689,4 @@ def build_open_classes_only_post(
     action = form.get("action")
     action_url = urljoin(current_url, action) if isinstance(action, str) and action else current_url
     return PeopleSoftPost(action_url=action_url, fields=tuple(fields))
+

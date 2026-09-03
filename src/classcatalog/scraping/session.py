@@ -1609,3 +1609,4 @@ class SdsuPeopleSoftSession:
             class_page,
             [tab_selector],
         )[0]
+

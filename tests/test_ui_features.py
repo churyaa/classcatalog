@@ -105,8 +105,8 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "Computer Science, B.S." not in javascript
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
-    assert "styles.css?v=59" in html
-    assert "app.js?v=59" in html
+    assert "styles.css?v=60" in html
+    assert "app.js?v=60" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -189,7 +189,7 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "persistCompletedCourses(hidden.value);" in javascript
     assert 'persistCompletedCourses("");' in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=59" in html
+    assert "app.js?v=60" in html
 
 
 def test_header_comparison_tagline_is_removed() -> None:
@@ -230,8 +230,8 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.good" in css
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
-    assert "styles.css?v=59" in html
-    assert "app.js?v=59" in html
+    assert "styles.css?v=60" in html
+    assert "app.js?v=60" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -347,8 +347,34 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-metric-grid' in css
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
-    assert 'styles.css?v=59' in html
-    assert 'app.js?v=59' in html
+    assert 'styles.css?v=60' in html
+    assert 'app.js?v=60' in html
+
+
+def test_admin_can_manage_manual_professor_matches() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert 'id="admin-professor-overrides-title"' in html
+    assert 'id="admin-professor-override-form"' in html
+    assert 'id="admin-professor-instructor-input"' in html
+    assert 'aria-controls="admin-professor-instructor-suggestions"' in html
+    assert 'id="admin-professor-instructor-suggestions"' in html
+    assert 'id="admin-professor-profile-input"' in html
+    assert 'id="admin-professor-override-save"' in html
+    assert 'id="admin-professor-overrides"' in html
+    assert 'id="admin-professor-override-result"' in html
+    assert "function matchingAdminProfessorOptions(query)" in javascript
+    assert "function renderAdminProfessorSuggestions()" in javascript
+    assert "function handleAdminProfessorKeydown(event)" in javascript
+    assert "function saveAdminProfessorOverride(event)" in javascript
+    assert "function deleteAdminProfessorOverride(instructorName, button)" in javascript
+    assert 'fetchJson("/api/admin/professors/overrides", {' in javascript
+    assert 'method: "DELETE"' in javascript
+    assert "setupAdminProfessorPicker();" in javascript
+    assert ".admin-professor-override-form" in css
+    assert ".admin-professor-override-table" in css
 
 
 def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
@@ -403,8 +429,8 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-table" in css
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
-    assert "styles.css?v=59" in html
-    assert "app.js?v=59" in html
+    assert "styles.css?v=60" in html
+    assert "app.js?v=60" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:

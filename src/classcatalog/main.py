@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from datetime import datetime, time, timezone
-from pathlib import Path
 import hmac
 import json
 import logging
 import os
 import secrets
 import time as time_module
+from contextlib import asynccontextmanager
+from datetime import datetime, time, timezone
+from pathlib import Path
 from typing import Annotated
 
 import uvicorn
@@ -16,7 +16,8 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from classcatalog.catalog.models import (
@@ -28,8 +29,8 @@ from classcatalog.catalog.models import (
     CatalogStatus,
     StudentProfileSummary,
 )
-from classcatalog.filters import SearchFilters
 from classcatalog.errors import RecentErrorStore, public_error_for_path
+from classcatalog.filters import SearchFilters
 from classcatalog.models import (
     GradingType,
     InstructionMode,
@@ -40,15 +41,24 @@ from classcatalog.models import (
     SortBy,
     Weekday,
 )
-from classcatalog.ratings import is_placeholder_instructor, normalize_person_name
-from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
+from classcatalog.ratings import (
+    RatingsCacheEditor,
+    RmpGraphqlClient,
+    canonical_instructor_name,
+    is_placeholder_instructor,
+    normalize_person_name,
+    parse_rmp_profile_id,
+)
 from classcatalog.repository import (
     ACTIVE_CATALOG_PATH,
     ACTIVE_DATA_PATH,
     ACTIVE_RATINGS_PATH,
     CourseRepository,
+)
+from classcatalog.repository import (
     repository as default_repository,
 )
+from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOGGER = logging.getLogger(__name__)
@@ -70,6 +80,11 @@ class SeatInterestRequest(BaseModel):
 
 class AdminSeatRefreshRequest(BaseModel):
     course_code: str
+
+
+class AdminProfessorOverrideRequest(BaseModel):
+    instructor_name: str = Field(min_length=1, max_length=200)
+    rmp_profile: str = Field(min_length=1, max_length=500)
 
 
 def _file_health(path: Path | None) -> dict[str, object]:
@@ -117,6 +132,41 @@ def _ratings_sync_summary(path: Path | None) -> dict[str, object]:
     return summary
 
 
+def _instructor_inventory(repository: CourseRepository) -> list[dict[str, object]]:
+    instructors: dict[str, dict[str, object]] = {}
+    for section in repository.sections:
+        if is_placeholder_instructor(section.instructor):
+            continue
+        display_name = canonical_instructor_name(section.instructor or "")
+        normalized_name = normalize_person_name(display_name)
+        if not normalized_name:
+            continue
+        item = instructors.setdefault(
+            normalized_name,
+            {
+                "name": display_name,
+                "normalized_name": normalized_name,
+                "course_codes": set(),
+                "matched": False,
+            },
+        )
+        course_codes = item["course_codes"]
+        assert isinstance(course_codes, set)
+        course_codes.add(section.course_code)
+        item["matched"] = bool(item["matched"] or section.professor is not None)
+
+    return [
+        {
+            **item,
+            "course_codes": sorted(item["course_codes"]),
+        }
+        for item in sorted(
+            instructors.values(),
+            key=lambda value: str(value["name"]).casefold(),
+        )
+    ]
+
+
 def _admin_health_snapshot(
     repository: CourseRepository,
     *,
@@ -125,12 +175,15 @@ def _admin_health_snapshot(
     ratings_path: Path | None,
     seat_refresh_service: SeatRefreshService | None = None,
     recent_errors: list[dict[str, object]] | None = None,
+    manual_rating_overrides: tuple[dict[str, object], ...] = (),
+    manual_ratings_enabled: bool = False,
+    manual_ratings_error: str | None = None,
 ) -> dict[str, object]:
     audit = repository.coverage_audit()
     catalog_status = repository.catalog.status()
 
     physical: dict[tuple[str, str], dict[str, bool]] = {}
-    instructor_matches: dict[str, bool] = {}
+    instructor_inventory = _instructor_inventory(repository)
     for section in repository.sections:
         physical_key = repository._physical_key(section)
         signals = physical.setdefault(
@@ -139,11 +192,6 @@ def _admin_health_snapshot(
         )
         if not is_placeholder_instructor(section.instructor):
             signals["instructor"] = True
-            normalized_name = normalize_person_name(section.instructor or "")
-            if normalized_name:
-                instructor_matches[normalized_name] = (
-                    instructor_matches.get(normalized_name, False) or section.professor is not None
-                )
         if (section.location or "").strip() or any(
             (meeting.location or "").strip() for meeting in section.meetings
         ):
@@ -154,10 +202,11 @@ def _admin_health_snapshot(
     missing_instructor = sum(not signals["instructor"] for signals in physical.values())
     missing_location = sum(not signals["location"] for signals in physical.values())
     missing_meetings = sum(not signals["meeting"] for signals in physical.values())
-    instructor_total = len(instructor_matches)
-    rmp_matched = sum(instructor_matches.values())
+    instructor_total = len(instructor_inventory)
+    rmp_matched = sum(bool(item["matched"]) for item in instructor_inventory)
     rmp_unmatched = max(0, instructor_total - rmp_matched)
     match_rate = round((rmp_matched / instructor_total * 100), 1) if instructor_total else 0.0
+    unmatched_instructors = [item for item in instructor_inventory if not item["matched"]]
 
     ratings_summary = _ratings_sync_summary(ratings_path)
     return {
@@ -189,6 +238,10 @@ def _admin_health_snapshot(
             "match_rate": match_rate,
             "cached_rating_records": repository.ratings_record_count,
             "sync": ratings_summary,
+            "manual_matching_enabled": manual_ratings_enabled,
+            "manual_matching_error": manual_ratings_error,
+            "unmatched_instructors": unmatched_instructors,
+            "manual_overrides": list(manual_rating_overrides),
         },
         "catalog": {
             "loaded": catalog_status.loaded,
@@ -214,6 +267,7 @@ def create_app(
     seat_refresh_service: SeatRefreshService | None = None,
     seat_refresh_enabled: bool | None = None,
     error_store: RecentErrorStore | None = None,
+    rmp_client: RmpGraphqlClient | None = None,
 ) -> FastAPI:
     """Create the API around an explicit repository for tests and data validation."""
 
@@ -221,6 +275,12 @@ def create_app(
     active_data_path = data_path or ACTIVE_DATA_PATH
     active_catalog_path = catalog_path if catalog_path is not None else ACTIVE_CATALOG_PATH
     active_ratings_path = ratings_path if ratings_path is not None else ACTIVE_RATINGS_PATH
+    ratings_editor = (
+        RatingsCacheEditor(active_ratings_path)
+        if active_ratings_path is not None
+        else None
+    )
+    active_rmp_client = rmp_client or RmpGraphqlClient()
     recent_error_store = error_store or RecentErrorStore()
     configured_admin_password = admin_password if admin_password is not None else os.getenv(ADMIN_PASSWORD_ENV)
     admin_enabled = bool(configured_admin_password)
@@ -286,6 +346,14 @@ def create_app(
     def _secure_cookie(request: Request) -> bool:
         forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
         return request.url.scheme == "https" or forwarded_proto == "https"
+
+    def _manual_rating_state() -> tuple[tuple[dict[str, object], ...], str | None]:
+        if ratings_editor is None:
+            return (), None
+        try:
+            return ratings_editor.manual_overrides(), None
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return (), f"{type(exc).__name__}: {exc}"
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -530,6 +598,7 @@ def create_app(
     async def admin_health(request: Request, response: Response) -> dict[str, object]:
         _require_admin(request)
         response.headers["Cache-Control"] = "no-store"
+        manual_overrides, manual_ratings_error = _manual_rating_state()
         return _admin_health_snapshot(
             active_repository,
             data_path=active_data_path,
@@ -537,7 +606,99 @@ def create_app(
             ratings_path=active_ratings_path,
             seat_refresh_service=active_seat_service,
             recent_errors=recent_error_store.snapshot(),
+            manual_rating_overrides=manual_overrides,
+            manual_ratings_enabled=ratings_editor is not None,
+            manual_ratings_error=manual_ratings_error,
         )
+
+    @app.post("/api/admin/professors/overrides")
+    async def admin_add_professor_override(
+        payload: AdminProfessorOverrideRequest,
+        request: Request,
+        response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        if ratings_editor is None or active_ratings_path is None:
+            raise HTTPException(
+                status_code=409,
+                detail="A professor ratings cache path must be configured before adding manual matches.",
+            )
+
+        normalized_name = normalize_person_name(payload.instructor_name)
+        targets = {
+            str(item["normalized_name"]): item
+            for item in _instructor_inventory(active_repository)
+        }
+        target = targets.get(normalized_name)
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Select an instructor from the active class schedule.",
+            )
+
+        try:
+            manual_names = {
+                normalize_person_name(str(item.get("name") or ""))
+                for item in ratings_editor.manual_overrides()
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="The professor ratings cache could not be read safely. Fix it before adding a match.",
+            ) from exc
+        if bool(target["matched"]) and normalized_name not in manual_names:
+            raise HTTPException(
+                status_code=409,
+                detail="This instructor already has an automatic RateMyProfessors match.",
+            )
+
+        try:
+            profile_id = parse_rmp_profile_id(payload.rmp_profile)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        candidate = await run_in_threadpool(active_rmp_client.lookup_legacy_id, profile_id)
+        if candidate is None or candidate.legacy_id != profile_id:
+            raise HTTPException(
+                status_code=404,
+                detail="That RateMyProfessors profile could not be found.",
+            )
+
+        course_codes = target["course_codes"]
+        assert isinstance(course_codes, list)
+        record = ratings_editor.upsert(
+            instructor_name=str(target["name"]),
+            course_codes=course_codes,
+            candidate=candidate,
+        )
+        changed_sections = active_repository.reload_ratings(active_ratings_path)
+        return {
+            "saved": True,
+            "override": record,
+            "updated_section_listings": changed_sections,
+        }
+
+    @app.delete("/api/admin/professors/overrides")
+    async def admin_delete_professor_override(
+        request: Request,
+        response: Response,
+        instructor_name: Annotated[str, Query(min_length=1, max_length=200)],
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        if ratings_editor is None or active_ratings_path is None:
+            raise HTTPException(status_code=404, detail="Manual professor matching is not configured.")
+
+        removed = ratings_editor.delete(instructor_name)
+        if removed is None:
+            raise HTTPException(status_code=404, detail="Manual professor match not found.")
+        changed_sections = active_repository.reload_ratings(active_ratings_path)
+        return {
+            "deleted": True,
+            "instructor_name": removed.get("name"),
+            "updated_section_listings": changed_sections,
+        }
 
     @app.post("/api/admin/seats/refresh")
     async def admin_refresh_seats(request: Request, response: Response) -> dict[str, object]:

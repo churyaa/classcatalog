@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from classcatalog.main import ADMIN_SESSION_COOKIE, create_app
-from classcatalog.repository import CourseRepository, SAMPLE_DATA_PATH
-
+from classcatalog.ratings import RmpCandidate
+from classcatalog.repository import SAMPLE_DATA_PATH, CourseRepository
 
 ADMIN_PASSWORD = "correct-horse-battery-staple"
 
@@ -17,6 +18,7 @@ def _client(
     data_path: Path = SAMPLE_DATA_PATH,
     catalog_path: Path | None = None,
     ratings_path: Path | None = None,
+    rmp_client: object | None = None,
     base_url: str = "http://testserver",
 ) -> TestClient:
     return TestClient(
@@ -26,6 +28,7 @@ def _client(
             catalog_path=catalog_path,
             ratings_path=ratings_path,
             admin_password=ADMIN_PASSWORD,
+            rmp_client=rmp_client,
         ),
         base_url=base_url,
     )
@@ -35,6 +38,42 @@ def _login(client: TestClient) -> None:
     response = client.post("/api/admin/login", json={"password": ADMIN_PASSWORD})
     assert response.status_code == 200
     assert response.json() == {"authenticated": True}
+
+
+class FakeAdminRmpClient:
+    def __init__(self) -> None:
+        self.lookups: list[int] = []
+
+    def lookup_legacy_id(self, legacy_id: int) -> RmpCandidate | None:
+        self.lookups.append(legacy_id)
+        if legacy_id != 123456:
+            return None
+        return RmpCandidate(
+            node_id="maya-profile",
+            legacy_id=legacy_id,
+            name="May Chen",
+            department="Computer Science",
+            rating=4.8,
+            difficulty=2.2,
+            num_reviews=55,
+            would_take_again_percent=94.0,
+        )
+
+
+def _repository_with_unmatched_maya() -> CourseRepository:
+    sections = CourseRepository.from_json(
+        SAMPLE_DATA_PATH,
+        catalog_path=None,
+        ratings_path=None,
+    ).sections
+    return CourseRepository(
+        tuple(
+            section.model_copy(update={"professor": None})
+            if section.instructor == "Maya Chen"
+            else section
+            for section in sections
+        )
+    )
 
 
 def test_admin_health_requires_authentication(tmp_path: Path) -> None:
@@ -179,3 +218,101 @@ def test_public_health_does_not_expose_local_file_paths() -> None:
     assert "catalog_data_file" not in payload
     assert "professor_ratings_data_file" not in payload
     assert str(SAMPLE_DATA_PATH) not in str(payload)
+
+
+def test_admin_can_persist_apply_and_remove_manual_professor_match(tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    repository = _repository_with_unmatched_maya()
+    rmp_client = FakeAdminRmpClient()
+    client = _client(repository, ratings_path=ratings_path, rmp_client=rmp_client)
+
+    unauthorized = client.post(
+        "/api/admin/professors/overrides",
+        json={"instructor_name": "Maya Chen", "rmp_profile": "123456"},
+    )
+    assert unauthorized.status_code == 401
+    assert not ratings_path.exists()
+
+    _login(client)
+    before = client.get("/api/admin/health").json()["professors"]
+    assert before["manual_matching_enabled"] is True
+    assert any(item["name"] == "Maya Chen" for item in before["unmatched_instructors"])
+
+    response = client.post(
+        "/api/admin/professors/overrides",
+        json={
+            "instructor_name": "Maya Chen",
+            "rmp_profile": "https://www.ratemyprofessors.com/professor/123456",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["saved"] is True
+    assert payload["updated_section_listings"] == 2
+    assert payload["override"]["rmp_name"] == "May Chen"
+    assert payload["override"]["metrics"]["external_id"] == "123456"
+    assert rmp_client.lookups == [123456]
+
+    document = json.loads(ratings_path.read_text(encoding="utf-8"))
+    assert document["records"][0]["match_source"] == "admin_override"
+    assert document["summary"]["manual_overrides"] == 1
+    maya_sections = [item for item in repository.sections if item.instructor == "Maya Chen"]
+    assert {item.professor.external_id for item in maya_sections if item.professor} == {"123456"}
+
+    after = client.get("/api/admin/health").json()["professors"]
+    assert not any(item["name"] == "Maya Chen" for item in after["unmatched_instructors"])
+    assert after["manual_overrides"][0]["name"] == "Maya Chen"
+
+    reloaded = CourseRepository.from_json(SAMPLE_DATA_PATH, ratings_path=ratings_path)
+    persisted = next(item for item in reloaded.sections if item.instructor == "Maya Chen")
+    assert persisted.professor is not None
+    assert persisted.professor.external_id == "123456"
+
+    removed = client.delete(
+        "/api/admin/professors/overrides",
+        params={"instructor_name": "Maya Chen"},
+    )
+    assert removed.status_code == 200
+    assert removed.json()["deleted"] is True
+    assert all(item.professor is None for item in repository.sections if item.instructor == "Maya Chen")
+
+
+def test_admin_professor_override_validates_instructor_and_profile(tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    repository = _repository_with_unmatched_maya()
+    rmp_client = FakeAdminRmpClient()
+    client = _client(repository, ratings_path=ratings_path, rmp_client=rmp_client)
+    _login(client)
+
+    invalid_profile = client.post(
+        "/api/admin/professors/overrides",
+        json={"instructor_name": "Maya Chen", "rmp_profile": "https://example.com/123456"},
+    )
+    assert invalid_profile.status_code == 400
+    assert "ratemyprofessors.com" in invalid_profile.json()["detail"]
+
+    unknown_instructor = client.post(
+        "/api/admin/professors/overrides",
+        json={"instructor_name": "Not A Scheduled Professor", "rmp_profile": "123456"},
+    )
+    assert unknown_instructor.status_code == 404
+    assert rmp_client.lookups == []
+
+
+def test_admin_professor_override_does_not_replace_automatic_match(tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    repository = CourseRepository.from_json(SAMPLE_DATA_PATH, ratings_path=ratings_path)
+    rmp_client = FakeAdminRmpClient()
+    client = _client(repository, ratings_path=ratings_path, rmp_client=rmp_client)
+    _login(client)
+
+    response = client.post(
+        "/api/admin/professors/overrides",
+        json={"instructor_name": "Maya Chen", "rmp_profile": "123456"},
+    )
+
+    assert response.status_code == 409
+    assert "already has an automatic" in response.json()["detail"]
+    assert rmp_client.lookups == []
+    assert not ratings_path.exists()

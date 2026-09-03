@@ -1,10 +1,10 @@
 ClassCatalog Website
-Latest assembled code handoff: v59
-Date: 2026-08-27
+Latest assembled code handoff: v60
+Date: 2026-09-03
 
 Includes:
-- Current src/classcatalog code through v59
-- Current tests and fixtures through v59
+- Current src/classcatalog code through v60
+- Current tests and fixtures through v60
 - README_NEW_CHAT.md with project history/state and user workflow preferences
 
 Intentionally excluded runtime/local-only files:
@@ -17,3 +17,10 @@ Intentionally excluded runtime/local-only files:
 - results/ deep-scrape/checkpoint directories
 
 The user's local project remains the source for those runtime datasets.
+
+v60 adds:
+- Admin-managed manual RateMyProfessors matches for unmatched SDSU instructor names
+- Instructor autocomplete using unmatched names and their active course codes
+- Strict RateMyProfessors profile URL/ID validation and authenticated write/delete APIs
+- Atomic persistence inside the private professor_ratings.json cache
+- Immediate in-memory rating updates plus change/remove controls and regression tests

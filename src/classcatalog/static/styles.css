@@ -808,6 +808,60 @@ footer { padding: 1.4rem clamp(1rem, 4vw, 4rem) 2rem; color: var(--muted); text-
 .admin-seat-failure-status.is-recovered { color: #1d6440; background: #e5f5eb; }
 .admin-seat-failure-retry { min-height: 2rem; padding: .38rem .62rem; white-space: nowrap; }
 .admin-seat-failure-empty { padding: 1rem !important; color: var(--muted); text-align: center !important; }
+.admin-professor-override-note { margin: -.25rem 0 .75rem; }
+.admin-professor-override-form {
+  display: grid;
+  gap: .45rem;
+  margin-bottom: .85rem;
+  padding: .8rem;
+  border: 1px solid #e2e6e9;
+  border-radius: .75rem;
+  background: #fafbfb;
+}
+.admin-professor-override-fields {
+  display: grid;
+  grid-template-columns: minmax(210px, .8fr) minmax(300px, 1.2fr) auto;
+  align-items: end;
+  gap: .6rem;
+}
+.admin-professor-override-fields label { min-width: 0; font-size: .72rem; font-weight: 800; }
+.admin-professor-override-fields input { width: 100%; min-height: 2.45rem; }
+.admin-professor-autocomplete { position: relative; display: block; }
+.admin-professor-override-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e2e6e9;
+  border-radius: .78rem;
+}
+.admin-professor-override-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  background: white;
+  font-size: .7rem;
+}
+.admin-professor-override-table th,
+.admin-professor-override-table td {
+  padding: .68rem .72rem;
+  border-bottom: 1px solid #e6eaed;
+  text-align: left;
+  vertical-align: top;
+}
+.admin-professor-override-table th {
+  color: #53606a;
+  background: #f6f8f9;
+  font-size: .64rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.admin-professor-override-table tbody tr:last-child td { border-bottom: 0; }
+.admin-professor-override-table td > strong,
+.admin-professor-override-table td > span { display: block; }
+.admin-professor-override-table td > span { margin-top: .18rem; color: var(--muted); font-size: .64rem; }
+.admin-professor-override-table a { color: var(--red); font-weight: 800; }
+.admin-professor-override-actions { display: flex; gap: .35rem; }
+.admin-professor-override-actions .admin-refresh { min-height: 2rem; padding: .38rem .62rem; white-space: nowrap; }
+.admin-professor-override-remove { color: #8e1728; }
 .admin-warning-list { margin-top: .85rem; padding: .8rem; border: 1px solid #ebbbc3; border-radius: .75rem; color: #7f1222; background: #fff5f6; font-size: .72rem; }
 .admin-warning-list strong { display: block; margin-bottom: .35rem; }
 .admin-warning-list ul { margin: 0; padding-left: 1.15rem; }
@@ -832,6 +886,8 @@ footer { padding: 1.4rem clamp(1rem, 4vw, 4rem) 2rem; color: var(--muted); text-
 @media (max-width: 900px) {
   .admin-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-two-column { grid-template-columns: 1fr; }
+  .admin-professor-override-fields { grid-template-columns: 1fr 1fr; }
+  .admin-professor-override-fields .admin-refresh { grid-column: 1 / -1; }
 }
 
 @media (max-width: 560px) {
@@ -841,6 +897,8 @@ footer { padding: 1.4rem clamp(1rem, 4vw, 4rem) 2rem; color: var(--muted); text-
   .admin-file-meta { text-align: left; }
   .admin-error-heading { align-items: flex-start; flex-direction: column; gap: .25rem; }
   .admin-seat-refresh-row { grid-template-columns: 1fr; }
+  .admin-professor-override-fields { grid-template-columns: 1fr; }
+  .admin-professor-override-fields .admin-refresh { grid-column: auto; }
 }
 
 .admin-heading-actions { display: flex; align-items: center; gap: .55rem; }

@@ -9,20 +9,25 @@ from threading import RLock
 
 from classcatalog.catalog.repository import CatalogRepository
 from classcatalog.filters import SearchFilters, matches, normalize_campus, sort_sections
-from classcatalog.requirements import sort_requirement_labels
-from classcatalog.ratings import apply_cached_ratings
 from classcatalog.models import (
     CourseComponent,
     CourseLookupOption,
     CourseSection,
     GradingType,
     InstructionMode,
+    ProfessorMetrics,
     ProgramClassification,
     SearchOptions,
     SearchResponse,
-    SectionCoverageAudit,
     SeatStatus,
+    SectionCoverageAudit,
 )
+from classcatalog.ratings import (
+    apply_cached_ratings,
+    load_ratings_metrics,
+    normalize_person_name,
+)
+from classcatalog.requirements import sort_requirement_labels
 
 
 def _term_sort_key(term: str) -> tuple[int, int, str]:
@@ -43,6 +48,7 @@ class CourseRepository:
         ratings_record_count: int = 0,
         ratings_load_error: str | None = None,
         catalog_load_error: str | None = None,
+        embedded_professors: Mapping[str, ProfessorMetrics | None] | None = None,
     ) -> None:
         self._lock = RLock()
         self._catalog = catalog or CatalogRepository.empty()
@@ -50,6 +56,11 @@ class CourseRepository:
         self._ratings_load_error = ratings_load_error
         self._catalog_load_error = catalog_load_error
         self._sections = self._catalog.enrich_sections(sections)
+        self._embedded_professors = (
+            dict(embedded_professors)
+            if embedded_professors is not None
+            else {section.id: section.professor for section in self._sections}
+        )
         self._course_total = len(
             {
                 (
@@ -81,6 +92,7 @@ class CourseRepository:
     ) -> CourseRepository:
         raw = json.loads(path.read_text(encoding="utf-8"))
         sections = tuple(CourseSection.model_validate(item) for item in raw)
+        embedded_professors = {section.id: section.professor for section in sections}
         effective_ratings_path = ratings_path if ratings_path is not None else resolve_ratings_path()
         ratings_load_error = None
         try:
@@ -105,6 +117,7 @@ class CourseRepository:
             ratings_record_count=ratings_record_count,
             ratings_load_error=ratings_load_error,
             catalog_load_error=catalog_load_error,
+            embedded_professors=embedded_professors,
         )
 
     @property
@@ -146,6 +159,27 @@ class CourseRepository:
     @property
     def catalog_load_error(self) -> str | None:
         return self._catalog_load_error
+
+    def reload_ratings(self, path: Path | None) -> int:
+        """Reload the complete ratings cache after an Admin override edit."""
+
+        metrics_by_name, record_count = load_ratings_metrics(path)
+        changed = 0
+        with self._lock:
+            replaced: list[CourseSection] = []
+            for section in self._sections:
+                metrics = metrics_by_name.get(
+                    normalize_person_name(section.instructor or ""),
+                    self._embedded_professors.get(section.id),
+                )
+                candidate = section.model_copy(update={"professor": metrics})
+                if candidate.professor != section.professor:
+                    changed += 1
+                replaced.append(candidate)
+            self._sections = tuple(replaced)
+            self._ratings_record_count = record_count
+            self._ratings_load_error = None
+        return changed
 
 
     def apply_seat_updates(

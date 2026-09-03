@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
+from threading import RLock
 from typing import Callable, Iterable, Protocol, Sequence
+from urllib.parse import urlparse
 
 from classcatalog.models import CourseSection, ProfessorMetrics
 
@@ -22,6 +24,7 @@ RMP_SCHOOL_RELAY_ID = "U2Nob29sLTg3Nw=="  # base64("School-877")
 RMP_PROFILE_BASE_URL = "https://www.ratemyprofessors.com/professor/"
 RMP_AUTHORIZATION = "Basic dGVzdDp0ZXN0"
 RMP_PROVIDER = "RateMyProfessors"
+RMP_MANUAL_MATCH_SOURCE = "admin_override"
 
 # SDSU roster names do not always match the preferred/display name used by RMP.
 # Keys are normalized SDSU names; values are additional RMP search/name variants.
@@ -139,6 +142,27 @@ def is_placeholder_instructor(name: str | None) -> bool:
 
 def normalize_course_code(course_code: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", (course_code or "").upper())
+
+
+def parse_rmp_profile_id(value: str) -> int:
+    """Return a legacy professor ID from a numeric ID or an RMP profile URL."""
+
+    candidate = (value or "").strip()
+    if re.fullmatch(r"[1-9][0-9]{0,9}", candidate):
+        return int(candidate)
+
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Enter a RateMyProfessors profile URL or numeric professor ID.")
+    if (parsed.hostname or "").casefold() not in {
+        "ratemyprofessors.com",
+        "www.ratemyprofessors.com",
+    }:
+        raise ValueError("The profile URL must be from ratemyprofessors.com.")
+    match = re.fullmatch(r"/professor/([1-9][0-9]{0,9})/?", parsed.path)
+    if match is None:
+        raise ValueError("The RateMyProfessors URL must contain /professor/<number>.")
+    return int(match.group(1))
 
 
 class JsonFileRatingsSource:
@@ -487,6 +511,221 @@ def apply_cached_ratings(
     return tuple(enriched), record_count
 
 
+class RatingsCacheEditor:
+    """Safely maintain Admin-created matches inside the existing ratings cache."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = RLock()
+
+    @staticmethod
+    def _blank_document() -> dict[str, object]:
+        return {
+            "provider": RMP_PROVIDER,
+            "school": {
+                "name": "San Diego State University",
+                "legacy_id": RMP_SCHOOL_LEGACY_ID,
+                "relay_id": RMP_SCHOOL_RELAY_ID,
+            },
+            "generated_at": None,
+            "summary": {
+                "instructors": 0,
+                "matched": 0,
+                "unmatched": 0,
+                "errors": 0,
+                "manual_overrides": 0,
+            },
+            "records": [],
+            "unmatched": [],
+            "errors": [],
+        }
+
+    def _read_document(self) -> dict[str, object]:
+        if not self.path.is_file():
+            return self._blank_document()
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            document = self._blank_document()
+            document["records"] = raw
+            return document
+        if not isinstance(raw, dict):
+            raise ValueError("Professor ratings cache must contain a JSON object or list.")
+        document = dict(raw)
+        for key in ("records", "unmatched", "errors"):
+            value = document.get(key)
+            if value is None:
+                document[key] = []
+            elif not isinstance(value, list):
+                raise ValueError(f"Professor ratings cache field {key!r} must be a list.")
+        if not isinstance(document.get("summary"), dict):
+            document["summary"] = {}
+        return document
+
+    @staticmethod
+    def _normalized_record_name(record: object) -> str:
+        if not isinstance(record, dict):
+            return ""
+        return str(
+            record.get("normalized_name")
+            or normalize_person_name(str(record.get("name") or ""))
+        ).strip()
+
+    @classmethod
+    def _is_manual_record(cls, record: object) -> bool:
+        return isinstance(record, dict) and record.get("match_source") == RMP_MANUAL_MATCH_SOURCE
+
+    @classmethod
+    def _refresh_summary(cls, document: dict[str, object]) -> None:
+        records = [item for item in document.get("records", []) if isinstance(item, dict)]
+        unmatched = [item for item in document.get("unmatched", []) if isinstance(item, dict)]
+        errors = [item for item in document.get("errors", []) if isinstance(item, dict)]
+        previous = document.get("summary")
+        previous = previous if isinstance(previous, dict) else {}
+        try:
+            prior_instructors = max(0, int(previous.get("instructors") or 0))
+        except (TypeError, ValueError):
+            prior_instructors = 0
+        document["summary"] = {
+            **previous,
+            "instructors": max(prior_instructors, len(records) + len(unmatched)),
+            "matched": len(records),
+            "unmatched": len(unmatched),
+            "errors": len(errors),
+            "manual_overrides": sum(cls._is_manual_record(item) for item in records),
+        }
+
+    def _write_document(self, document: dict[str, object]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(document, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(self.path)
+
+    def manual_overrides(self) -> tuple[dict[str, object], ...]:
+        with self._lock:
+            document = self._read_document()
+            records = document.get("records", [])
+            assert isinstance(records, list)
+            return tuple(
+                dict(record)
+                for record in records
+                if self._is_manual_record(record)
+            )
+
+    def upsert(
+        self,
+        *,
+        instructor_name: str,
+        course_codes: Sequence[str],
+        candidate: RmpCandidate,
+    ) -> dict[str, object]:
+        normalized_name = normalize_person_name(instructor_name)
+        if not normalized_name:
+            raise ValueError("Select a valid scheduled instructor.")
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            document = self._read_document()
+            records = document.get("records", [])
+            unmatched = document.get("unmatched", [])
+            assert isinstance(records, list)
+            assert isinstance(unmatched, list)
+
+            previous_manual = next(
+                (
+                    record
+                    for record in records
+                    if self._normalized_record_name(record) == normalized_name
+                    and self._is_manual_record(record)
+                ),
+                None,
+            )
+            created_at = (
+                str(previous_manual.get("created_at"))
+                if isinstance(previous_manual, dict) and previous_manual.get("created_at")
+                else timestamp
+            )
+            record: dict[str, object] = {
+                "name": canonical_instructor_name(instructor_name),
+                "normalized_name": normalized_name,
+                "course_codes": sorted({str(code).strip().upper() for code in course_codes if str(code).strip()}),
+                "rmp_name": candidate.name,
+                "rmp_department": candidate.department,
+                "match_source": RMP_MANUAL_MATCH_SOURCE,
+                "created_at": created_at,
+                "updated_at": timestamp,
+                "metrics": candidate.metrics(1.0).model_dump(mode="json"),
+            }
+            document["records"] = sorted(
+                [
+                    item
+                    for item in records
+                    if self._normalized_record_name(item) != normalized_name
+                ]
+                + [record],
+                key=self._normalized_record_name,
+            )
+            document["unmatched"] = [
+                item
+                for item in unmatched
+                if self._normalized_record_name(item) != normalized_name
+            ]
+            document["manual_overrides_updated_at"] = timestamp
+            self._refresh_summary(document)
+            self._write_document(document)
+            return record
+
+    def delete(self, normalized_name: str) -> dict[str, object] | None:
+        normalized_name = normalize_person_name(normalized_name)
+        if not normalized_name:
+            return None
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            document = self._read_document()
+            records = document.get("records", [])
+            unmatched = document.get("unmatched", [])
+            assert isinstance(records, list)
+            assert isinstance(unmatched, list)
+            removed = next(
+                (
+                    dict(record)
+                    for record in records
+                    if self._normalized_record_name(record) == normalized_name
+                    and self._is_manual_record(record)
+                ),
+                None,
+            )
+            if removed is None:
+                return None
+
+            document["records"] = [
+                item
+                for item in records
+                if not (
+                    self._normalized_record_name(item) == normalized_name
+                    and self._is_manual_record(item)
+                )
+            ]
+            if not any(self._normalized_record_name(item) == normalized_name for item in unmatched):
+                unmatched.append(
+                    {
+                        "name": removed.get("name"),
+                        "normalized_name": normalized_name,
+                        "course_codes": removed.get("course_codes", []),
+                        "reason": "manual_override_removed",
+                        "candidate_count": 0,
+                    }
+                )
+            document["unmatched"] = sorted(unmatched, key=self._normalized_record_name)
+            document["manual_overrides_updated_at"] = timestamp
+            self._refresh_summary(document)
+            self._write_document(document)
+            return removed
+
+
 def _load_sync_records(path: Path) -> dict[str, dict[str, object]]:
     if not path.is_file():
         return {}
@@ -564,10 +803,19 @@ def sync_rate_my_professors(
 
     existing = _load_sync_records(output_path)
     existing = {key: value for key, value in existing.items() if key in all_target_names}
+    manual_records = {
+        key: value
+        for key, value in existing.items()
+        if value.get("match_source") == RMP_MANUAL_MATCH_SOURCE
+    }
     if refresh and not selected_names:
-        cached: dict[str, dict[str, object]] = {}
+        cached: dict[str, dict[str, object]] = dict(manual_records)
     elif refresh:
-        cached = {key: value for key, value in existing.items() if key not in selected_names}
+        cached = {
+            key: value
+            for key, value in existing.items()
+            if key not in selected_names or key in manual_records
+        }
     else:
         cached = existing
     records = dict(cached)
