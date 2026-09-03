@@ -2435,6 +2435,115 @@ function syncStickyFilterOffset() {
   document.documentElement.style.setProperty("--toolbar-sticky-height", `${toolbarHeight}px`);
 }
 
+function setupFilterFlyouts() {
+  const filters = document.querySelector(".filters");
+  if (!filters) return;
+
+  const groups = [...filters.querySelectorAll(":scope > details")];
+  if (!groups.length) return;
+
+  const sideFlyoutBreakpoint = 760;
+  const minimumFlyoutWidth = 200;
+  const preferredFlyoutWidth = 340;
+  const viewportPadding = 8;
+  const flyoutGap = 12;
+  let animationFrame = 0;
+
+  const openGroup = () => groups.find((group) => group.open);
+
+  function closeOtherGroups(activeGroup) {
+    groups.forEach((group) => {
+      if (group !== activeGroup && group.open) group.open = false;
+    });
+  }
+
+  function syncFlyoutMode() {
+    const railLeft = filters.getBoundingClientRect().left;
+    const availableLeftSpace = Math.floor(railLeft - viewportPadding - flyoutGap);
+    const useSideFlyout = window.innerWidth > sideFlyoutBreakpoint && availableLeftSpace >= minimumFlyoutWidth;
+
+    filters.classList.toggle("filters-side-flyout", useSideFlyout);
+    if (useSideFlyout) {
+      filters.style.setProperty(
+        "--filter-flyout-width",
+        `${Math.min(preferredFlyoutWidth, availableLeftSpace)}px`,
+      );
+    } else {
+      filters.style.removeProperty("--filter-flyout-width");
+      filters.style.setProperty("--filter-flyout-shift", "0px");
+    }
+
+    positionOpenFlyout();
+  }
+
+  function positionOpenFlyout() {
+    const group = openGroup();
+    if (!group || !filters.classList.contains("filters-side-flyout")) {
+      filters.style.setProperty("--filter-flyout-shift", "0px");
+      return;
+    }
+
+    const body = group.querySelector(":scope > .filter-body");
+    if (!body) return;
+
+    filters.style.setProperty("--filter-flyout-shift", "0px");
+    const rect = body.getBoundingClientRect();
+    const topLimit = 12;
+    const bottomLimit = window.innerHeight - 12;
+    let shift = 0;
+
+    if (rect.bottom > bottomLimit) shift -= rect.bottom - bottomLimit;
+    if (rect.top + shift < topLimit) shift += topLimit - (rect.top + shift);
+
+    filters.style.setProperty("--filter-flyout-shift", `${Math.round(shift)}px`);
+  }
+
+  function requestFlyoutPosition() {
+    if (animationFrame) return;
+    animationFrame = window.requestAnimationFrame(() => {
+      animationFrame = 0;
+      positionOpenFlyout();
+    });
+  }
+
+  groups.forEach((group) => {
+    group.open = false;
+    group.addEventListener("toggle", () => {
+      if (group.open) closeOtherGroups(group);
+      requestFlyoutPosition();
+    });
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!filters.classList.contains("filters-side-flyout")) return;
+    if (filters.contains(event.target)) return;
+    const group = openGroup();
+    if (group) group.open = false;
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const group = openGroup();
+    if (!group) return;
+    const summary = group.querySelector(":scope > summary");
+    group.open = false;
+    summary?.focus();
+  });
+
+  window.addEventListener("resize", syncFlyoutMode);
+  window.addEventListener("scroll", requestFlyoutPosition, { passive: true });
+
+  if ("ResizeObserver" in window) {
+    const resizeObserver = new ResizeObserver(requestFlyoutPosition);
+    groups.forEach((group) => {
+      const body = group.querySelector(":scope > .filter-body");
+      if (body) resizeObserver.observe(body);
+    });
+  }
+
+  syncFlyoutMode();
+}
+
 function clearFilters() {
   document.querySelectorAll('.filters input[type="checkbox"]').forEach((input) => { input.checked = false; });
   const defaultCampus = document.querySelector('input[name="campus"][value="San Diego Campus"]');
@@ -2451,6 +2560,7 @@ function clearFilters() {
 
 async function boot() {
   updateFavoritesCount();
+  setupFilterFlyouts();
   syncPageFromHash();
   window.addEventListener("hashchange", syncPageFromHash);
   const adminRefresh = document.querySelector("#admin-refresh");

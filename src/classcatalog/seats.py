@@ -431,6 +431,7 @@ class SeatRefreshService:
                 "error_type": type(exc).__name__,
                 "detail": str(exc),
                 "occurrences": occurrences,
+                "resolved": False,
             }
             while len(self._failure_history) > MAX_RETAINED_SEAT_FAILURES:
                 self._failure_history.popitem(last=False)
@@ -582,6 +583,9 @@ class SeatRefreshService:
             with self._lock:
                 self._records.update(cache_rows)
                 self._source_last_success[source_url] = completed_at
+                retained_failure = self._failure_history.get(source_url)
+                if retained_failure is not None:
+                    retained_failure["resolved"] = True
                 self._last_success_at = completed_at
                 self._last_error = None
                 self._last_sections_updated = len(cache_rows)
@@ -739,7 +743,11 @@ class SeatRefreshService:
                         for key, value in retained.items()
                         if key != "last_failed_timestamp"
                     }
-                    | {"resolved": bool(last_success_at and last_success_at > failed_at)}
+                    | {
+                        "resolved": bool(
+                            retained.get("resolved", last_success_at and last_success_at > failed_at)
+                        )
+                    }
                 )
             public.update(
                 {
