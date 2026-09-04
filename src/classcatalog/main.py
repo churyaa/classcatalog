@@ -8,8 +8,8 @@ import secrets
 import time as time_module
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timezone
-from pathlib import Path
 from typing import Annotated
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -68,7 +68,8 @@ ADMIN_SESSION_COOKIE = "classcatalog_admin_session"
 ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8
 ADMIN_LOGIN_WINDOW_SECONDS = 60 * 15
 ADMIN_LOGIN_MAX_FAILURES = 5
-
+BASE_DIR = Path(__file__).resolve().parent
+ERROR_PAGES_DIR = BASE_DIR / "error_pages"
 
 class AdminLoginRequest(BaseModel):
     password: str
@@ -406,37 +407,88 @@ def create_app(
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def handle_http_exception(request: Request, exc: StarletteHTTPException):
-        if exc.status_code < 500:
-            return await http_exception_handler(request, exc)
-        LOGGER.warning(
-            "API failure method=%s path=%s status=%s detail=%s",
-            request.method,
-            request.url.path,
-            exc.status_code,
-            exc.detail,
-        )
-        return _service_error_response(
-            request,
-            status_code=exc.status_code,
-            error=exc,
-            detail=exc.detail,
-        )
+    async def handle_http_exception(
+            request: Request,
+            exc: StarletteHTTPException,
+    ):
+        # API endpoints should always keep their JSON responses.
+        if request.url.path.startswith("/api/"):
+            if exc.status_code < 500:
+                return await http_exception_handler(request, exc)
+
+            LOGGER.warning(
+                "API failure method=%s path=%s status=%s detail=%s",
+                request.method,
+                request.url.path,
+                exc.status_code,
+                exc.detail,
+            )
+
+            return _service_error_response(
+                request,
+                status_code=exc.status_code,
+                error=exc,
+                detail=exc.detail,
+            )
+
+        # Normal website 404.
+        if exc.status_code == 404:
+            return FileResponse(
+                ERROR_PAGES_DIR / "404.html",
+                status_code=404,
+                media_type="text/html",
+                )
+
+        # Normal website server errors.
+        if exc.status_code >= 500:
+            LOGGER.warning(
+                "Website failure method=%s path=%s status=%s detail=%s",
+                request.method,
+                request.url.path,
+                exc.status_code,
+                exc.detail,
+            )
+
+            return FileResponse(
+                ERROR_PAGES_DIR / "500.html",
+                status_code=exc.status_code,
+                media_type="text/html",
+                )
+
+        return await http_exception_handler(request, exc)
+
 
     @app.exception_handler(Exception)
-    async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+    async def handle_unexpected_exception(
+            request: Request,
+            exc: Exception,
+    ):
         LOGGER.error(
-            "Unhandled API failure method=%s path=%s",
+            "Unhandled failure method=%s path=%s",
             request.method,
             request.url.path,
             exc_info=(type(exc), exc, exc.__traceback__),
         )
-        return _service_error_response(
-            request,
+
+        if request.url.path.startswith("/api/"):
+            return _service_error_response(
+                request,
+                status_code=500,
+                error=exc,
+                detail=exc,
+            )
+
+        return FileResponse(
+            ERROR_PAGES_DIR / "500.html",
             status_code=500,
-            error=exc,
-            detail=exc,
-        )
+            media_type="text/html",
+            )
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
