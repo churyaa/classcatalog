@@ -29,7 +29,8 @@ from classcatalog.dataset.models import (
     ValidationIssue,
     ValidationSeverity,
 )
-from classcatalog.models import CourseSection, Meeting
+from classcatalog.models import CourseSection, InstructionMode, Meeting
+from classcatalog.instruction_modes import classify_sdsu_instruction_mode
 from classcatalog.repository import CourseRepository
 from classcatalog.scraping.class_post import find_class_number_actions
 from classcatalog.scraping.models import (
@@ -808,6 +809,16 @@ def _normalise_section(
         )
         for meeting in source.meetings
     )
+    has_timed_meeting = any(
+        meeting.start_time is not None or meeting.end_time is not None
+        for meeting in meetings
+    )
+
+    instruction_mode = classify_sdsu_instruction_mode(
+        source.instruction_mode_text,
+        has_timed_meeting=has_timed_meeting,
+        fallback=source.instruction_mode,
+    ) or source.instruction_mode
     prerequisite_text = source.prerequisite_text
     manual_review = bool(prerequisite_text and prerequisite_text.strip())
     return CourseSection(
@@ -865,7 +876,7 @@ def _normalise_section(
         prerequisite_manual_review=manual_review,
         enrollment_requirements=source.enrollment_requirements,
         class_notes=source.class_notes,
-        instruction_mode=source.instruction_mode,
+        instruction_mode=instruction_mode,
         instruction_mode_text=source.instruction_mode_text,
         seat_status=source.seat_status,
         seats_available=source.seats_available,

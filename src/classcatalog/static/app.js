@@ -313,9 +313,10 @@ const labels = {
   letter_or_credit_no_credit: "Letter or Cr/NC",
   other: "Other",
   in_person: "In person",
-  online_synchronous: "Online — live",
-  online_asynchronous: "Online — asynchronous",
   hybrid: "Hybrid",
+  online_asynchronous: "Online (Asynchronous)",
+  online_synchronous: "Online (Synchronous)",
+  online_with_in_person_exams: "Online with in-person exams",
   open: "Open",
   waitlist: "Waitlist",
   closed: "Closed",
@@ -1044,8 +1045,22 @@ function populateOptions(options) {
     );
   }
   options.gradings.forEach((value) => checkbox(gradings, "grading", value, labels[value] || value));
-  options.instruction_modes.forEach((value) => checkbox(formats, "instruction_mode", value, labels[value] || value));
-  options.seat_statuses.filter((value) => value !== "unknown").forEach((value) => checkbox(seatStatuses, "seat_status", value, labels[value] || value));
+const instructionModeOptions = [
+  "in_person",
+  "hybrid",
+  "online_asynchronous",
+  "online_synchronous",
+  "online_with_in_person_exams",
+];
+
+instructionModeOptions.forEach((value) =>
+  checkbox(
+    formats,
+    "instruction_mode",
+    value,
+    labels[value] || value
+  )
+);  options.seat_statuses.filter((value) => value !== "unknown").forEach((value) => checkbox(seatStatuses, "seat_status", value, labels[value] || value));
 
   const days = document.querySelector("#days");
   days.replaceChildren();

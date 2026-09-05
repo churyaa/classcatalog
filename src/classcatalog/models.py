@@ -20,6 +20,7 @@ class InstructionMode(StrEnum):
     IN_PERSON = "in_person"
     ONLINE_SYNCHRONOUS = "online_synchronous"
     ONLINE_ASYNCHRONOUS = "online_asynchronous"
+    ONLINE_WITH_IN_PERSON_EXAMS = "online_with_in_person_exams"
     HYBRID = "hybrid"
     OTHER = "other"
 

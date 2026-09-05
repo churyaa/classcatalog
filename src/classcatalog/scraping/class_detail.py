@@ -1,4 +1,5 @@
 from __future__ import annotations
+from classcatalog.instruction_modes import classify_sdsu_instruction_mode
 
 import re
 from dataclasses import dataclass
@@ -210,21 +211,7 @@ def _parse_grading(value: str | None) -> GradingType | None:
 
 
 def _parse_instruction_mode(value: str | None) -> InstructionMode | None:
-    if value is None:
-        return None
-    normalized = re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
-    if "in person" in normalized or "face to face" in normalized:
-        return InstructionMode.IN_PERSON
-    if "hybrid" in normalized:
-        return InstructionMode.HYBRID
-    if "asynchronous" in normalized:
-        return InstructionMode.ONLINE_ASYNCHRONOUS
-    if "synchronous" in normalized:
-        return InstructionMode.ONLINE_SYNCHRONOUS
-    # A generic "online" label is intentionally not guessed as synchronous vs asynchronous.
-    if "online" in normalized:
-        return InstructionMode.OTHER
-    return InstructionMode.OTHER
+    return classify_sdsu_instruction_mode(value)
 
 
 def _grid_tables(soup: BeautifulSoup) -> tuple[tuple[tuple[str, ...], Tag], ...]:
@@ -666,12 +653,12 @@ def assemble_sdsu_course_section(
 
     meetings = class_info.meetings
     if not meetings and (
-        option.meeting_dates
-        or option.days
-        or option.start_time
-        or option.end_time
-        or option.location
-        or option.instructor
+            option.meeting_dates
+            or option.days
+            or option.start_time
+            or option.end_time
+            or option.location
+            or option.instructor
     ):
         meetings = (
             ClassMeetingRecord(
@@ -684,6 +671,16 @@ def assemble_sdsu_course_section(
             ),
         )
 
+    has_timed_meeting = any(
+        meeting.start_time is not None or meeting.end_time is not None
+        for meeting in meetings
+    )
+
+    instruction_mode = classify_sdsu_instruction_mode(
+        class_info.instruction_mode_text,
+        has_timed_meeting=has_timed_meeting,
+        fallback=class_info.instruction_mode or InstructionMode.OTHER,
+    ) or InstructionMode.OTHER
     instructor = next(
         (meeting.instructor for meeting in meetings if meeting.instructor),
         option.instructor,
@@ -728,7 +725,7 @@ def assemble_sdsu_course_section(
         prerequisite_text=prerequisite_text,
         enrollment_requirements=class_info.enrollment_requirements,
         class_notes=class_info.class_notes,
-        instruction_mode=class_info.instruction_mode or InstructionMode.OTHER,
+        instruction_mode=instruction_mode,
         instruction_mode_text=class_info.instruction_mode_text,
         seat_status=(
             class_info.status
