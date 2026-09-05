@@ -1183,10 +1183,25 @@ footer { padding: 1.4rem clamp(1rem, 4vw, 4rem) 2rem; color: var(--muted); text-
   .privacy-row { grid-template-columns: 1fr; gap: .3rem; }
   .toolbar { position: static; grid-template-columns: 1fr; }
   .term-control { grid-column: auto; }
-  .layout { grid-template-columns: 1fr; }
-  .layout { height: auto; overflow: visible; }
-  .filters { height: auto; overflow: visible; order: 1; }
-  .results { height: auto; overflow: visible; order: 0; }
+
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .filters {
+    height: auto;
+    overflow: visible;
+    order: 0;
+  }
+
+  .results {
+    height: auto;
+    overflow: visible;
+    order: 1;
+  }
+
   .course-top { flex-direction: column; gap: .35rem; }
   .course-code-wrap { flex-basis: auto; min-width: 0; }
   .pagination-top { align-self: stretch; flex-direction: column; }
