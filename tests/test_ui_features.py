@@ -466,31 +466,39 @@ def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -
     assert ".service-alert" in css
 
 
-def test_about_privacy_page_explains_local_storage_accounts_and_data_sources() -> None:
+def test_about_page_explains_classcatalog_and_links_to_legal_pages() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
-    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
-    css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
     assert 'id="about-nav"' in html
     assert 'href="#about"' in html
     assert 'id="about-page"' in html
     assert 'id="about-title"' in html
-    assert "Selected major" in html
-    assert "first-party cookie for up to one year" in html
-    assert "Completed courses" in html
-    assert "browser’s local storage" in html
-    assert "No public user account" in html
-    assert "not synchronized to another browser or device" in html
-    assert "sent to the ClassCatalog server" in html
-    assert "class numbers may be sent" in html
-    assert "SDSU public sources" in html
-    assert "Seat data is refreshed periodically" in html
-    assert "cached Rate My Professors data" in html
-    assert "https://my.sdsu.edu/guides/public-schedule" in html
-    assert "https://catalog.sdsu.edu/" in html
-    assert "https://www.ratemyprofessors.com/school/877" in html
-    assert 'const aboutActive = window.location.hash === "#about";' in javascript
-    assert 'document.title = "About & Privacy — ClassCatalog";' in javascript
-    assert ".about-view" in css
-    assert ".privacy-table" in css
-    assert ".source-list" in css
+
+    about = html[
+        html.index('id="about-page"'):
+        html.index('id="admin-page"')
+    ]
+
+    assert "About ClassCatalog" in about
+    assert "What ClassCatalog does" in about
+    assert "Where the information comes from" in about
+    assert "Before enrolling" in about
+    assert "Privacy and terms" in about
+
+    assert "independent planning aid" in about
+    assert "not an official SDSU enrollment system" in about
+    assert "SDSU public sources" in about
+    assert "Rate My Professors" in about
+    assert "official SDSU systems" in about
+
+    assert 'href="/privacy">Privacy Policy</a>' in about
+    assert 'href="/terms">Terms of Service</a>' in about
+
+    # Privacy-specific details now belong on the separate /privacy page.
+    assert "Selected major" not in about
+    assert "Completed courses" not in about
+
+    # The redesigned About page is intentionally a simple document,
+    # without the previous cards or decorative symbols.
+    assert "about-card" not in about
+    assert "about-icon" not in about

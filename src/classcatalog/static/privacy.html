@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Privacy Policy for ClassCatalog, an independent SDSU class-planning aid.">
+  <title>Privacy Policy — ClassCatalog</title>
+  <script>
+    (() => {
+      const cookieName = "classcatalog_theme";
+      const encodedName = `${encodeURIComponent(cookieName)}=`;
+      const match = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(encodedName));
+      let savedTheme = "";
+
+      if (match) {
+        try {
+          savedTheme = decodeURIComponent(match.slice(encodedName.length));
+        } catch (_error) {}
+      }
+
+      if (!savedTheme) {
+        try {
+          savedTheme = localStorage.getItem("classcatalog_theme_v1") || "";
+          if (savedTheme) {
+            let cookie = `${encodedName}${encodeURIComponent(savedTheme)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+            if (window.location.protocol === "https:") cookie += "; Secure";
+            document.cookie = cookie;
+            localStorage.removeItem("classcatalog_theme_v1");
+          }
+        } catch (_error) {}
+      }
+
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css?v=60">
+  <link rel="stylesheet" href="/static/legal.css?v=1">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand-wrap" href="/" aria-label="ClassCatalog home">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <h1>classcatalog</h1>
+      </a>
+    </div>
+  </header>
+
+  <main class="legal-page-shell">
+    <article class="legal-document" aria-labelledby="privacy-page-title">
+      <header>
+        <h2 id="privacy-page-title">Privacy Policy</h2>
+        <p class="legal-updated">Last updated September 8, 2026</p>
+      </header>
+
+      <section aria-labelledby="privacy-overview">
+        <h3 id="privacy-overview">Overview</h3>
+        <p>
+          ClassCatalog is an independent SDSU class-planning aid. The public
+          site does not require a student account, and ClassCatalog does not
+          ask you for your SDSU password or student ID to use the class finder.
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy-browser">
+        <h3 id="privacy-browser">What we save in your browser</h3>
+        <ul>
+          <li>Your selected major may be saved in a first-party cookie for up to one year.</li>
+          <li>Your completed-course selections may be saved in a first-party cookie for up to one year.</li>
+          <li>Your selected theme may be saved in a first-party cookie so it can be restored later.</li>
+          <li>Your favorites are saved in local storage until you remove them or clear the site's browser data.</li>
+        </ul>
+        <p class="legal-note">
+          These preferences are browser-specific and are not synchronized to a
+          public ClassCatalog account.
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy-requests">
+        <h3 id="privacy-requests">What is sent to ClassCatalog</h3>
+        <p>
+          Search terms and selected filters are sent to the ClassCatalog server
+          so matching classes can be returned. When degree-planning features
+          are used, the selected major, catalog year, and completed courses may
+          also be included in those requests.
+        </p>
+        <p>
+          Favorites remain in local storage. When you view Favorites, class
+          numbers may be sent to ClassCatalog to retrieve current class or seat
+          information.
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy-analytics">
+        <h3 id="privacy-analytics">Analytics</h3>
+        <p>
+          ClassCatalog uses Google Analytics to understand how the site is used
+          and to improve it. Depending on the browser and analytics
+          configuration, analytics data may include pages viewed, approximate
+          location, device and browser information, referral source, and site
+          interactions.
+        </p>
+        <p>
+          Google Analytics may use cookies or similar technologies and is also
+          governed by Google's own privacy practices.
+        </p>
+        <p>
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer noopener">Google Privacy Policy</a>
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy-sources">
+        <h3 id="privacy-sources">Third-party data and links</h3>
+        <p>
+          Class information, meeting details, enrollment information, seat
+          availability, and degree-catalog information come from SDSU public
+          sources.
+        </p>
+        <p>
+          Professor ratings and related review signals come from cached Rate My
+          Professors data. Community-submitted ratings can be incomplete,
+          subjective, or outdated.
+        </p>
+        <p>External sites have their own privacy policies and practices.</p>
+      </section>
+
+      <section aria-labelledby="privacy-control">
+        <h3 id="privacy-control">Your choices</h3>
+        <p>
+          You can remove ClassCatalog cookies and local-storage data using your
+          browser's site-data controls. Doing so may reset your selected theme,
+          major, completed-course list, and favorites.
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy-updates">
+        <h3 id="privacy-updates">Changes to this policy</h3>
+        <p>
+          This policy may be updated when ClassCatalog's features, storage
+          practices, analytics configuration, or third-party services change.
+          The date at the top identifies the current version.
+        </p>
+      </section>
+    </article>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p>Planning aid only. Always verify prerequisites, enrollment rules, meeting details, and seat status with SDSU.</p>
+      <a href="/">Home</a>
+      <a href="/privacy" aria-current="page">Privacy</a>
+      <a href="/terms">Terms</a>
+    </div>
+  </footer>
+</body>
+</html>

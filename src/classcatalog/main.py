@@ -486,6 +486,14 @@ def create_app(
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    @app.get("/privacy", include_in_schema=False)
+    async def privacy_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "privacy.html")
+
+    @app.get("/terms", include_in_schema=False)
+    async def terms_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "terms.html")
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")

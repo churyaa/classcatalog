@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Terms of Service for ClassCatalog, an independent SDSU class-planning aid.">
+  <title>Terms of Service — ClassCatalog</title>
+  <script>
+    (() => {
+      const cookieName = "classcatalog_theme";
+      const encodedName = `${encodeURIComponent(cookieName)}=`;
+      const match = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(encodedName));
+      let savedTheme = "";
+
+      if (match) {
+        try {
+          savedTheme = decodeURIComponent(match.slice(encodedName.length));
+        } catch (_error) {}
+      }
+
+      if (!savedTheme) {
+        try {
+          savedTheme = localStorage.getItem("classcatalog_theme_v1") || "";
+          if (savedTheme) {
+            let cookie = `${encodedName}${encodeURIComponent(savedTheme)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+            if (window.location.protocol === "https:") cookie += "; Secure";
+            document.cookie = cookie;
+            localStorage.removeItem("classcatalog_theme_v1");
+          }
+        } catch (_error) {}
+      }
+
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css?v=60">
+  <link rel="stylesheet" href="/static/legal.css?v=1">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand-wrap" href="/" aria-label="ClassCatalog home">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <h1>classcatalog</h1>
+      </a>
+    </div>
+  </header>
+
+  <main class="legal-page-shell">
+    <article class="legal-document" aria-labelledby="terms-page-title">
+      <header>
+        <h2 id="terms-page-title">Terms of Service</h2>
+        <p class="legal-updated">Last updated September 8, 2026</p>
+      </header>
+
+      <section aria-labelledby="terms-acceptance">
+        <h3 id="terms-acceptance">Using ClassCatalog</h3>
+        <p>
+          By accessing or using ClassCatalog, you agree to these Terms of
+          Service. If you do not agree with them, do not use the service.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-planning">
+        <h3 id="terms-planning">ClassCatalog is a planning aid</h3>
+        <p>
+          ClassCatalog is an independent project and is not affiliated with,
+          sponsored by, or endorsed by San Diego State University or Rate My
+          Professors.
+        </p>
+        <p>
+          ClassCatalog does not enroll you in courses and does not replace
+          my.SDSU, the official SDSU catalog, degree evaluation, academic
+          advising, or other official university systems.
+        </p>
+        <p>
+          Always verify prerequisites, restrictions, meeting information,
+          degree requirements, deadlines, and seat availability with official
+          SDSU sources before making enrollment decisions. SDSU's official
+          records control.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-accuracy">
+        <h3 id="terms-accuracy">Accuracy and availability</h3>
+        <p>
+          Class, seat, professor, catalog, and schedule information can be
+          incomplete, delayed, outdated, unavailable, or incorrect.
+        </p>
+        <p>
+          Seat information is refreshed periodically and can lag behind
+          official SDSU systems. A displayed seat is not a guarantee that the
+          seat will still be available when you try to enroll.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-third-party">
+        <h3 id="terms-third-party">Third-party data and links</h3>
+        <p>
+          ClassCatalog uses information from public SDSU sources and cached
+          Rate My Professors data. Community-submitted professor ratings are
+          opinions and may be incomplete, subjective, or outdated.
+        </p>
+        <p>External websites are operated independently and have their own terms, policies, and content.</p>
+      </section>
+
+      <section aria-labelledby="terms-use">
+        <h3 id="terms-use">Acceptable use</h3>
+        <p>You may use ClassCatalog for lawful class-search and planning purposes.</p>
+        <p>You may not intentionally:</p>
+        <ul>
+          <li>interfere with or disrupt the service or its infrastructure;</li>
+          <li>bypass access controls, security measures, or rate limits;</li>
+          <li>send excessive automated traffic that degrades the service;</li>
+          <li>attempt unauthorized access to administrative or private functionality;</li>
+          <li>use ClassCatalog in a way that violates applicable law.</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="terms-payments">
+        <h3 id="terms-payments">Payments and refunds</h3>
+        <p>
+          ClassCatalog does not currently charge users for access to the public
+          class finder, so no refund policy currently applies to ordinary use
+          of the site.
+        </p>
+        <p>
+          If paid features are introduced later, applicable pricing,
+          cancellation, and refund terms should be disclosed before purchase.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-rights">
+        <h3 id="terms-rights">Third-party names and content</h3>
+        <p>
+          SDSU, Rate My Professors, and other third-party names, trademarks,
+          content, and data remain subject to the rights of their respective
+          owners. Reference to a third party does not imply sponsorship,
+          affiliation, or endorsement of ClassCatalog.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-disclaimer">
+        <h3 id="terms-disclaimer">Disclaimer</h3>
+        <p>
+          To the extent permitted by applicable law, ClassCatalog is provided
+          on an "as is" and "as available" basis without warranties that the
+          service will be uninterrupted, error-free, complete, or accurate.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-liability">
+        <h3 id="terms-liability">Limitation of liability</h3>
+        <p>
+          To the extent permitted by applicable law, the ClassCatalog operator
+          is not responsible for losses or consequences resulting from reliance
+          on inaccurate, incomplete, outdated, or delayed information,
+          including missed enrollment opportunities or academic planning
+          decisions.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-privacy">
+        <h3 id="terms-privacy">Privacy</h3>
+        <p>
+          The separate <a href="/privacy">Privacy Policy</a> explains browser
+          storage, requests, analytics, and third-party services.
+        </p>
+      </section>
+
+      <section aria-labelledby="terms-updates">
+        <h3 id="terms-updates">Changes to these terms</h3>
+        <p>
+          These terms may be updated as ClassCatalog changes. The date at the
+          top identifies the current version.
+        </p>
+      </section>
+    </article>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p>Planning aid only. Always verify prerequisites, enrollment rules, meeting details, and seat status with SDSU.</p>
+      <a href="/">Home</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms" aria-current="page">Terms</a>
+    </div>
+  </footer>
+</body>
+</html>
