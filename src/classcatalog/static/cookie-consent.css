@@ -1,0 +1,104 @@
+/*
+ * Bottom cookie/analytics consent banner.
+ * Uses ClassCatalog theme variables when present and safe fallbacks otherwise.
+ */
+
+.cookie-consent-banner[hidden] {
+  display: none !important;
+}
+
+.cookie-consent-banner {
+  position: fixed;
+  z-index: 10000;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-top: 1px solid
+    var(--ui, var(--border, rgba(128, 128, 128, 0.55)));
+  background:
+    var(--background, var(--bg, var(--surface, Canvas)));
+  color:
+    var(--text, var(--foreground, CanvasText));
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.14);
+}
+
+.cookie-consent-inner {
+  width: min(100% - 32px, 1120px);
+  margin: 0 auto;
+  padding: 15px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+}
+
+.cookie-consent-copy {
+  max-width: 760px;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.cookie-consent-copy a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.cookie-consent-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.cookie-consent-button {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid
+    var(--ui, var(--border, currentColor));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.cookie-consent-button:hover {
+  border-color: var(--accent, var(--main, currentColor));
+}
+
+.cookie-consent-button:focus-visible,
+.footer-cookie-settings:focus-visible {
+  outline: 2px solid var(--accent, var(--main, currentColor));
+  outline-offset: 2px;
+}
+
+.footer-cookie-settings {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+@media (max-width: 720px) {
+  .cookie-consent-inner {
+    width: min(100% - 28px, 1120px);
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cookie-consent-actions {
+    width: 100%;
+  }
+
+  .cookie-consent-button {
+    flex: 1 1 0;
+  }
+}
