@@ -14,36 +14,97 @@ METADATA_FILES = tuple(sorted(LIVE_ROOT.glob("**/metadata.json")))
 
 @pytest.mark.skipif(not METADATA_FILES, reason="Run the scraper with --save-fixtures first.")
 def test_saved_live_fixtures_remain_parseable() -> None:
+    def is_search_fixture(filename: str) -> bool:
+        if filename in {
+            "initial.html",
+            "filtered.html",
+            "all-statuses.html",
+        }:
+            return True
+
+        return (
+            filename.startswith("fallback-")
+            and (
+                filename.endswith("-initial.html")
+                or filename.endswith("-all-statuses.html")
+                or filename.endswith("-filtered.html")
+            )
+        )
+
     for metadata_path in METADATA_FILES:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         subject = str(metadata["subject"])
         term = str(metadata["term"])
-        initial_path = metadata_path.parent / "initial.html"
-        filtered_path = metadata_path.parent / "filtered.html"
-        assert initial_path.is_file()
-        assert filtered_path.is_file()
+        declared_files = tuple(str(name) for name in metadata.get("files", ()))
 
-        initial_html = initial_path.read_text(encoding="utf-8")
-        filtered_html = filtered_path.read_text(encoding="utf-8")
-        try:
-            find_subject_facet(initial_html, subject)
-        except SubjectFacetNotFound:
-            initial_hits = parse_result_rows(
-                initial_html,
+        assert declared_files
+        assert "initial.html" in declared_files
+
+        # Every file declared by metadata must physically exist, including
+        # detail shell/grouplet/course-info fixtures.
+        for filename in declared_files:
+            assert (metadata_path.parent / filename).is_file()
+
+        search_files = tuple(
+            filename
+            for filename in declared_files
+            if is_search_fixture(filename)
+        )
+
+        assert search_files, f"{subject}: no saved search-stage fixtures"
+
+        authoritative_state_found = False
+
+        for filename in search_files:
+            fixture_path = metadata_path.parent / filename
+            html = fixture_path.read_text(encoding="utf-8")
+
+            no_results = has_no_results_message(html)
+
+            if no_results:
+                authoritative_state_found = True
+                continue
+
+            hits = parse_result_rows(
+                html,
                 term=term,
                 term_code="0000",
                 base_url="https://cmsweb.cms.sdsu.edu/",
             )
-            assert has_no_results_message(initial_html) or all(
-                hit.subject == subject for hit in initial_hits
+
+            try:
+                find_subject_facet(html, subject)
+                facet_matches = True
+            except SubjectFacetNotFound:
+                facet_matches = False
+
+            subject_only_hits = bool(hits) and all(
+                hit.subject == subject
+                for hit in hits
             )
 
-        hits = parse_result_rows(
-            filtered_html,
-            term=term,
-            term_code="0000",
-            base_url="https://cmsweb.cms.sdsu.edu/",
-            expected_subject=subject,
-            strict_subject=True,
+            if facet_matches or subject_only_hits:
+                authoritative_state_found = True
+
+            # A true filtered fixture gets the strongest validation.
+            if (
+                filename == "filtered.html"
+                or filename.endswith("-filtered.html")
+            ):
+                filtered_hits = parse_result_rows(
+                    html,
+                    term=term,
+                    term_code="0000",
+                    base_url="https://cmsweb.cms.sdsu.edu/",
+                    expected_subject=subject,
+                    strict_subject=True,
+                )
+                assert all(
+                    hit.subject == subject
+                    for hit in filtered_hits
+                )
+
+        assert authoritative_state_found, (
+            f"{subject}: saved search history contains no matching subject "
+            "facet, subject-only result set, or authoritative no-results state"
         )
-        assert all(hit.subject == subject for hit in hits)

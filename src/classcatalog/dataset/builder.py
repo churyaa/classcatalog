@@ -182,10 +182,18 @@ def _snapshot(hit: CourseSearchHit) -> InventoryCourseSnapshot:
 
 
 def _logical_course_key(item: InventoryCourseSnapshot) -> str:
-    """Return the snapshot-comparison identity, excluding volatile offer numbers."""
+    """Return the unique PeopleSoft course-offering identity."""
 
     course_identity = item.crse_id or f"catalog:{item.catalog_number}"
-    return "|".join((item.subject, course_identity, item.acad_career or ""))
+
+    return "|".join(
+        (
+            item.subject,
+            course_identity,
+            str(item.crse_offer_nbr or ""),
+            item.acad_career or "",
+        )
+    )
 
 
 def _course_identity_key(item: InventoryCourseSnapshot) -> str:
@@ -392,11 +400,18 @@ def _build_inventory_diff(
 
     offering_number_changes: list[InventoryOfferingNumberChange] = []
     metadata_changes: list[InventoryCourseChange] = []
+    reconciled_matches = 0
+    # Compare stable course-level inventory metadata only.
+    #
+    # ``class_number`` is deliberately excluded. Search results choose one
+    # representative physical class as the detail target, and that class can
+    # differ between otherwise identical snapshots without representing an
+    # inventory change.
     metadata_fields = (
         "course_code",
         "catalog_number",
         "title",
-        "class_number",
+        "acad_career",
         "section_count",
     )
     for logical_key in sorted(matching_keys):
@@ -436,25 +451,140 @@ def _build_inventory_diff(
         for key in deep_keys - discovery_keys
     }
 
+    # Reconcile one-to-one PeopleSoft offer/career remaps before attempting
+    # true course rekey detection.
+    #
+    # A CRSE_ID may legitimately expose multiple simultaneous offerings.
+    # For example, MUSIC 102 can have offer 1 and offer 3 at the same time.
+    # Therefore we only collapse an unmatched pair into an offer/career
+    # remap when that subject + CRSE_ID has exactly one inventory record on
+    # each side in the complete snapshots.
+    def _crse_identity(item: InventoryCourseSnapshot) -> str:
+        course_identity = item.crse_id or f"catalog:{item.catalog_number}"
+        return "|".join((item.subject, course_identity))
+
+    discovery_all_by_crse: dict[str, list[InventoryCourseSnapshot]] = defaultdict(list)
+    deep_all_by_crse: dict[str, list[InventoryCourseSnapshot]] = defaultdict(list)
+
+    for item in discovery_inventory.values():
+        discovery_all_by_crse[_crse_identity(item)].append(item)
+
+    for item in deep_inventory.values():
+        deep_all_by_crse[_crse_identity(item)].append(item)
+
+    discovery_unmatched_by_crse: dict[str, list[str]] = defaultdict(list)
+    deep_unmatched_by_crse: dict[str, list[str]] = defaultdict(list)
+
+    for logical_key, item in discovery_unmatched.items():
+        discovery_unmatched_by_crse[_crse_identity(item)].append(logical_key)
+
+    for logical_key, item in deep_unmatched.items():
+        deep_unmatched_by_crse[_crse_identity(item)].append(logical_key)
+
+    for crse_identity in sorted(
+        set(discovery_unmatched_by_crse) & set(deep_unmatched_by_crse)
+    ):
+        # Do not collapse simultaneous offerings. A remap is only
+        # unambiguous when the complete snapshots each contain exactly one
+        # record for this subject + CRSE_ID.
+        if len(discovery_all_by_crse[crse_identity]) != 1:
+            continue
+        if len(deep_all_by_crse[crse_identity]) != 1:
+            continue
+
+        discovery_candidates = discovery_unmatched_by_crse[crse_identity]
+        deep_candidates = deep_unmatched_by_crse[crse_identity]
+
+        if len(discovery_candidates) != 1 or len(deep_candidates) != 1:
+            continue
+
+        discovery_key = discovery_candidates[0]
+        deep_key = deep_candidates[0]
+
+        discovery = discovery_unmatched[discovery_key]
+        deep = deep_unmatched[deep_key]
+
+        # Same CRSE_ID, but PeopleSoft moved the course to another offer
+        # number and/or academic career.
+        if discovery.crse_id != deep.crse_id:
+            continue
+
+        discovery_offers = _offer_numbers((discovery,))
+        deep_offers = _offer_numbers((deep,))
+
+        if discovery_offers != deep_offers:
+            offering_number_changes.append(
+                InventoryOfferingNumberChange(
+                    logical_course_key=crse_identity,
+                    discovery=discovery,
+                    deep=deep,
+                    discovery_offer_numbers=discovery_offers,
+                    deep_offer_numbers=deep_offers,
+                )
+            )
+
+        changed = _changed_fields(
+            discovery,
+            deep,
+            (
+                "course_code",
+                "catalog_number",
+                "title",
+                "acad_career",
+                "section_count",
+            ),
+        )
+        if changed:
+            metadata_changes.append(
+                InventoryCourseChange(
+                    course_key=crse_identity,
+                    discovery=discovery,
+                    deep=deep,
+                    changed_fields=changed,
+                )
+            )
+
+        reconciled_matches += 1
+        del discovery_unmatched[discovery_key]
+        del deep_unmatched[deep_key]
+
+    # Anything still unmatched may represent an actual PeopleSoft course
+    # rekey. Match by logical catalog identity, but require CRSE_ID itself
+    # to have changed; offer/career-only moves were handled above.
     discovery_by_identity: dict[str, list[str]] = defaultdict(list)
     deep_by_identity: dict[str, list[str]] = defaultdict(list)
+
     for logical_key, item in discovery_unmatched.items():
         discovery_by_identity[_course_identity_key(item)].append(logical_key)
+
     for logical_key, item in deep_unmatched.items():
         deep_by_identity[_course_identity_key(item)].append(logical_key)
 
     rekeyed: list[InventoryCourseRekey] = []
+
     for identity_key in sorted(set(discovery_by_identity) & set(deep_by_identity)):
         discovery_candidates = discovery_by_identity[identity_key]
         deep_candidates = deep_by_identity[identity_key]
+
         if len(discovery_candidates) != 1 or len(deep_candidates) != 1:
             continue
+
         discovery_key = discovery_candidates[0]
         deep_key = deep_candidates[0]
+
         discovery = discovery_unmatched[discovery_key]
         deep = deep_unmatched[deep_key]
-        if _normalise_inventory_text(discovery.title) != _normalise_inventory_text(deep.title):
+
+        if (
+            _normalise_inventory_text(discovery.title)
+            != _normalise_inventory_text(deep.title)
+        ):
             continue
+
+        # A rekey means the PeopleSoft CRSE_ID actually changed.
+        if discovery.crse_id == deep.crse_id:
+            continue
+
         changed = _changed_fields(
             discovery,
             deep,
@@ -466,6 +596,7 @@ def _build_inventory_diff(
                 "detail_url",
             ),
         )
+
         rekeyed.append(
             InventoryCourseRekey(
                 course_identity_key=identity_key,
@@ -474,6 +605,7 @@ def _build_inventory_diff(
                 changed_fields=changed,
             )
         )
+
         del discovery_unmatched[discovery_key]
         del deep_unmatched[deep_key]
 
@@ -503,8 +635,8 @@ def _build_inventory_diff(
                 severity=ValidationSeverity.WARNING,
                 code="inventory_drift_detected",
                 message=(
-                    "Discovery and deep inventories differ after ignoring volatile PeopleSoft "
-                    f"offer numbers: {len(only_discovery)} only in discovery, "
+                    "Discovery and deep PeopleSoft offering inventories differ: "
+                    f"{len(only_discovery)} only in discovery, "
                     f"{len(only_deep)} only in deep, {len(rekeyed)} rekeyed courses, "
                     f"{len(offering_number_changes)} offering-number changes, and "
                     f"{len(metadata_changes)} other metadata changes. The exact records are "
@@ -519,18 +651,19 @@ def _build_inventory_diff(
         discovery_path=str(discovery_path),
         discovery_courses=len(discovery_inventory),
         deep_courses=len(deep_inventory),
-        matching_courses=len(matching_keys),
+        matching_courses=len(matching_keys) + reconciled_matches,
         only_in_discovery=only_discovery,
         only_in_deep=only_deep,
         rekeyed_courses=tuple(rekeyed),
         offering_number_changes=tuple(offering_number_changes),
         changed_courses=tuple(metadata_changes),
         note=(
-            "Snapshot reconciliation identifies a logical course by subject, CRSE_ID, and "
-            "academic career. CRSE_OFFER_NBR is preserved in production records but reported "
-            "as metadata drift instead of a course addition/removal. Same-code/title records "
-            "whose CRSE_ID changed are reported separately as PeopleSoft rekeys. The completed "
-            "deep subject outputs remain the publication source."
+            "Snapshot reconciliation preserves distinct PeopleSoft offerings by subject, "
+            "CRSE_ID, offer number, and academic career. Unambiguous one-to-one offer/career "
+            "moves for the same CRSE_ID are reported as metadata drift rather than additions "
+            "and removals. Same-code/title records whose CRSE_ID actually changed are reported "
+            "separately as PeopleSoft rekeys. The completed deep subject outputs remain the "
+            "publication source."
         ),
     )
 

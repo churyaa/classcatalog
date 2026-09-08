@@ -94,7 +94,7 @@ class InventoryDiff(BaseModel):
     offering_number_changes: tuple[InventoryOfferingNumberChange, ...] = ()
     changed_courses: tuple[InventoryCourseChange, ...] = ()
     preferred_inventory: str = "deep_subject_outputs"
-    identity_strategy: str = "subject|crse_id|acad_career"
+    identity_strategy: str = "subject|crse_id|crse_offer_nbr|acad_career"
     note: str | None = None
 
 

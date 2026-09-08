@@ -280,24 +280,37 @@ def validate_api_sections(
         add("options_endpoint", options_endpoint)
 
         def default_pagination() -> _CheckOutcome:
+            expected = repository.search(
+                SearchFilters(page=1, page_size=50)
+            )
             payload = _response_payload(
                 get("/api/classes", params={"page": 1, "page_size": 50})
             )
-            expected_pages = max(1, math.ceil(repository.total / 50))
-            assert payload["unfiltered_total"] == repository.total, (
-                "The API unfiltered total does not match the repository."
+
+            assert payload["unfiltered_total"] == expected.unfiltered_total, (
+                "The API unfiltered total does not match grouped repository semantics."
             )
-            assert payload["filtered_total"] == repository.total, (
-                "The default request unexpectedly filtered the dataset."
+            assert payload["filtered_total"] == expected.filtered_total, (
+                "The default request unexpectedly changed the grouped result count."
             )
-            assert payload["page"] == 1, "The first page did not resolve to page 1."
-            assert payload["page_size"] == 50, "The production page size is not 50."
-            assert payload["total_pages"] == expected_pages, "The total page count is incorrect."
-            assert len(payload["items"]) == min(50, repository.total), (
-                "The first page returned an unexpected number of records."
+            assert payload["page"] == expected.page, (
+                "The first page did not resolve to page 1."
             )
+            assert payload["page_size"] == expected.page_size, (
+                "The production page size is not 50."
+            )
+            assert payload["total_pages"] == expected.total_pages, (
+                "The total page count is incorrect."
+            )
+
+            actual_ids = [item["id"] for item in payload["items"]]
+            expected_ids = [item.id for item in expected.items]
+            assert actual_ids == expected_ids, (
+                "The first API page differs from direct repository search."
+            )
+
             return _pass(
-                "Default pagination returns at most 50 sections and correct totals.",
+                "Default pagination matches grouped repository search semantics.",
                 filtered_total=payload["filtered_total"],
                 page_size=payload["page_size"],
                 total_pages=payload["total_pages"],
@@ -308,26 +321,61 @@ def validate_api_sections(
         def full_pagination() -> _CheckOutcome:
             if not settings.full_pagination:
                 return _skip("Full-page traversal was disabled.")
-            total_pages = max(1, math.ceil(repository.total / 50))
+
+            expected_first = repository.search(
+                SearchFilters(page=1, page_size=50)
+            )
+            total_pages = expected_first.total_pages
             seen: list[str] = []
+
             for page in range(1, total_pages + 1):
-                payload = _response_payload(
-                    get("/api/classes", params={"page": page, "page_size": 50})
+                expected = repository.search(
+                    SearchFilters(page=page, page_size=50)
                 )
-                assert payload["page"] == page, f"Requested page {page} returned another page."
-                assert payload["total_pages"] == total_pages, (
+                payload = _response_payload(
+                    get(
+                        "/api/classes",
+                        params={"page": page, "page_size": 50},
+                    )
+                )
+
+                assert payload["page"] == expected.page, (
+                    f"Requested page {page} returned another page."
+                )
+                assert payload["total_pages"] == expected.total_pages, (
                     "The total page count changed during traversal."
                 )
-                assert len(payload["items"]) <= 50, "A page exceeded 50 items."
-                seen.extend(str(item["id"]) for item in payload["items"])
-            assert len(seen) == repository.total, (
-                "Traversing every page did not return every course-section listing."
+                assert payload["filtered_total"] == expected.filtered_total, (
+                    "The filtered total changed during traversal."
+                )
+                assert payload["unfiltered_total"] == expected.unfiltered_total, (
+                    "The unfiltered total changed during traversal."
+                )
+
+                actual_keys = [
+                    _payload_display_option_key(item)
+                    for item in payload["items"]
+                ]
+                expected_keys = [
+                    _section_display_option_key(item)
+                    for item in expected.items
+                ]
+
+                assert actual_keys == expected_keys, (
+                    f"API page {page} differs from direct repository search."
+                )
+
+                seen.extend(actual_keys)
+
+            assert len(seen) == expected_first.filtered_total, (
+                "Traversing every page did not return every displayed enrollment option."
             )
-            assert len(set(seen)) == repository.total, (
-                "Pagination returned duplicate normalized section IDs."
+            assert len(set(seen)) == len(seen), (
+                "Full pagination returned duplicate displayed enrollment options."
             )
+
             return _pass(
-                "Every production page was traversed with no omissions or duplicate IDs.",
+                "Every grouped production page was traversed with no omissions or duplicate IDs.",
                 pages=total_pages,
                 listings=len(seen),
             )
@@ -335,29 +383,65 @@ def validate_api_sections(
         add("full_pagination", full_pagination)
 
         def pagination_boundaries() -> _CheckOutcome:
-            total_pages = max(1, math.ceil(repository.total / 50))
+            expected_first = repository.search(
+                SearchFilters(page=1, page_size=50)
+            )
+            total_pages = expected_first.total_pages
+
+            expected_last = repository.search(
+                SearchFilters(page=total_pages, page_size=50)
+            )
             last = _response_payload(
-                get("/api/classes", params={"page": total_pages, "page_size": 50})
+                get(
+                    "/api/classes",
+                    params={"page": total_pages, "page_size": 50},
+                )
             )
-            expected_last = repository.total - ((total_pages - 1) * 50)
-            assert len(last["items"]) == expected_last, "The final page size is incorrect."
+
+            assert [item["id"] for item in last["items"]] == [
+                item.id for item in expected_last.items
+            ], "The final API page differs from direct repository search."
+
+            expected_last_count = len(expected_last.items)
+            assert len(last["items"]) == expected_last_count, (
+                "The final page size is incorrect."
+            )
+
+            beyond_page = total_pages + 100
+            expected_beyond = repository.search(
+                SearchFilters(page=beyond_page, page_size=50)
+            )
             beyond = _response_payload(
-                get("/api/classes", params={"page": total_pages + 100, "page_size": 50})
+                get(
+                    "/api/classes",
+                    params={"page": beyond_page, "page_size": 50},
+                )
             )
-            assert beyond["page"] == total_pages, "A page beyond the end was not clamped."
+
+            assert beyond["page"] == expected_beyond.page == total_pages, (
+                "A page beyond the end was not clamped."
+            )
             assert [item["id"] for item in beyond["items"]] == [
-                item["id"] for item in last["items"]
-            ], "The clamped page differs from the true final page."
-            assert get("/api/classes", params={"page_size": 51}).status_code == 422, (
+                item.id for item in expected_beyond.items
+            ], "The clamped API page differs from repository semantics."
+
+            assert get(
+                "/api/classes",
+                params={"page_size": 51},
+            ).status_code == 422, (
                 "The API accepted a page size above 50."
             )
-            assert get("/api/classes", params={"page": 0}).status_code == 422, (
+            assert get(
+                "/api/classes",
+                params={"page": 0},
+            ).status_code == 422, (
                 "The API accepted page zero."
             )
+
             return _pass(
                 "Last-page sizing, clamping, and request bounds are correct.",
                 total_pages=total_pages,
-                last_page_items=expected_last,
+                last_page_items=expected_last_count,
             )
 
         add("pagination_boundaries", pagination_boundaries)
@@ -755,11 +839,21 @@ def validate_api_sections(
                     )
                 )
                 expected = repository.search(
-                    SearchFilters(sort_by=sort_by, page=1, page_size=50)
+                    SearchFilters(
+                        sort_by=sort_by,
+                        page=1,
+                        page_size=50,
+                    )
                 )
+
                 assert [item["id"] for item in payload["items"]] == [
                     item.id for item in expected.items
                 ], f"Sort {sort_by.value!r} differs from repository order."
+
+                assert payload["filtered_total"] == expected.filtered_total, (
+                    f"Sort {sort_by.value!r} differs from repository grouped-result count."
+                )
+
                 ordered = sorted(
                     payload["items"],
                     key=_payload_alphabetical_key,
@@ -781,6 +875,7 @@ def validate_api_sections(
                 SortBy.TAKE_AGAIN_LOW_TO_HIGH,
                 SortBy.TAKE_AGAIN_HIGH_TO_LOW,
             )
+
             for sort_by in metric_sorts:
                 payload = _response_payload(
                     get(
@@ -788,11 +883,26 @@ def validate_api_sections(
                         params={"sort_by": sort_by.value, "page_size": 50},
                     )
                 )
-                assert payload["filtered_total"] == repository.total, (
-                    f"Sort {sort_by.value!r} unexpectedly filtered records."
+                expected = repository.search(
+                    SearchFilters(
+                        sort_by=sort_by,
+                        page=1,
+                        page_size=50,
+                    )
                 )
+
+                assert payload["filtered_total"] == expected.filtered_total, (
+                    f"Sort {sort_by.value!r} differs from repository grouped-result count."
+                )
+                assert payload["unfiltered_total"] == expected.unfiltered_total, (
+                    f"Sort {sort_by.value!r} changed the unfiltered grouped count."
+                )
+                assert [item["id"] for item in payload["items"]] == [
+                    item.id for item in expected.items
+                ], f"Sort {sort_by.value!r} differs from repository order."
+
             return _pass(
-                "All UI sort values are accepted and alphabetical ordering is correct.",
+                "All UI sort values match repository grouped-result semantics.",
                 sort_modes_checked=12,
             )
 
@@ -800,16 +910,45 @@ def validate_api_sections(
 
         def filtered_pagination() -> _CheckOutcome:
             mode = Counter(
-                section.instruction_mode for section in repository.sections
+                section.instruction_mode
+                for section in repository.sections
             ).most_common(1)[0][0]
+
+            expected_first = repository.search(
+                SearchFilters(
+                    instruction_modes=(mode,),
+                    page=1,
+                    page_size=50,
+                )
+            )
             first = _response_payload(
                 get(
                     "/api/classes",
-                    params={"instruction_mode": mode.value, "page": 1, "page_size": 50},
+                    params={
+                        "instruction_mode": mode.value,
+                        "page": 1,
+                        "page_size": 50,
+                    },
                 )
             )
+
+            assert first["filtered_total"] == expected_first.filtered_total, (
+                "Filtered pagination count differs from repository semantics."
+            )
+            assert first["total_pages"] == expected_first.total_pages, (
+                "Filtered pagination page count differs from repository semantics."
+            )
+
             seen: list[str] = []
+
             for page in range(1, first["total_pages"] + 1):
+                expected = repository.search(
+                    SearchFilters(
+                        instruction_modes=(mode,),
+                        page=page,
+                        page_size=50,
+                    )
+                )
                 payload = _response_payload(
                     get(
                         "/api/classes",
@@ -820,18 +959,43 @@ def validate_api_sections(
                         },
                     )
                 )
-                seen.extend(str(item["id"]) for item in payload["items"])
+
+                actual_keys = [
+                    _payload_display_option_key(item)
+                    for item in payload["items"]
+                ]
+                expected_keys = [
+                    _section_display_option_key(item)
+                    for item in expected.items
+                ]
+
+                assert actual_keys == expected_keys, (
+                    f"Filtered API page {page} differs from repository search."
+                )
+
                 assert all(
-                    item["instruction_mode"] == mode.value for item in payload["items"]
-                ), "Filtered pagination leaked another instruction mode."
+                    item["instruction_mode"] == mode.value
+                    or any(
+                        component["instruction_mode"] == mode.value
+                        for component in item.get("linked_components", ())
+                    )
+                    for item in payload["items"]
+                ), (
+                    "Filtered pagination returned a grouped option with no "
+                    "physical component matching the selected instruction mode."
+                )
+
+                seen.extend(actual_keys)
+
             assert len(seen) == first["filtered_total"], (
-                "Filtered pagination omitted one or more matching rows."
+                "Filtered pagination omitted one or more matching displayed options."
             )
             assert len(set(seen)) == len(seen), (
-                "Filtered pagination returned duplicate section IDs."
+                "Filtered pagination returned duplicate displayed enrollment options."
             )
+
             return _pass(
-                "A broad production filter paginates without omissions or duplicates.",
+                "A broad grouped production filter paginates without omissions or duplicates.",
                 instruction_mode=mode.value,
                 pages=first["total_pages"],
                 matches=first["filtered_total"],
@@ -874,7 +1038,7 @@ def validate_api_sections(
     warnings = sum(check.status is ApiCheckStatus.WARNING for check in checks)
     skipped = sum(check.status is ApiCheckStatus.SKIPPED for check in checks)
     status = "failed" if errors else ("passed_with_warnings" if warnings else "passed")
-    total_pages = max(1, math.ceil(repository.total / 50))
+    total_pages = repository.search(SearchFilters(page=1, page_size=50)).total_pages
     performance = ApiPerformanceMetrics(
         requests=len(request_durations),
         total_ms=round(sum(request_durations), 2),
@@ -903,6 +1067,41 @@ def validate_api_sections(
         skipped=skipped,
     )
     return ApiValidationResult(report=report, exit_code=0 if errors == 0 else 1)
+
+
+def _payload_display_option_key(item):
+    linked = item.get("linked_components") or ()
+    components = tuple(
+        sorted(
+            (
+                str(component.get("schedule_number") or ""),
+                str(component.get("component") or ""),
+            )
+            for component in linked
+        )
+    )
+    return (
+        str(item["id"]),
+        int(item.get("option_number") or 0),
+        components,
+    )
+
+
+def _section_display_option_key(item):
+    components = tuple(
+        sorted(
+            (
+                str(component.schedule_number),
+                str(component.component or ""),
+            )
+            for component in item.linked_components
+        )
+    )
+    return (
+        str(item.id),
+        int(item.option_number or 0),
+        components,
+    )
 
 
 def validate_api_data_file(

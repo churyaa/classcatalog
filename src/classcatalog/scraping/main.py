@@ -257,6 +257,55 @@ def _default_subject_output_dir(term: str) -> Path:
 def _subject_output_path(root: Path, subject: str) -> Path:
     return root / f"{_slug(subject)}.json"
 
+def _load_course_keys_file(path: Path | None) -> frozenset[str] | None:
+    if path is None:
+        return None
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+
+    if not isinstance(raw, list):
+        raise ValueError("--course-keys-file must contain a JSON array.")
+
+    keys: set[str] = set()
+
+    for item in raw:
+        if isinstance(item, str):
+            key = item.strip()
+        elif isinstance(item, dict):
+            key = str(item.get("course_key") or "").strip()
+        else:
+            key = ""
+
+        if key:
+            keys.add(key)
+
+    if not keys:
+        raise ValueError(
+            "--course-keys-file did not contain any course_key values."
+        )
+
+    return frozenset(keys)
+
+
+def _filter_result_to_course_keys(
+        result: SubjectScrapeResult,
+        course_keys: frozenset[str] | None,
+) -> SubjectScrapeResult:
+    if course_keys is None:
+        return result
+
+    matching = tuple(
+        hit
+        for hit in result.courses
+        if course_detail_key(hit) in course_keys
+    )
+
+    return result.model_copy(
+        update={
+            "courses": matching,
+            "filtered_result_count": len(matching),
+        }
+    )
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -320,6 +369,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "For each subject, follow up to this many course details. Defaults to 0 "
             "for a new run; when --resume is used and omitted, the checkpoint value "
             "is reused."
+        ),
+    )
+    parser.add_argument(
+        "--course-keys-file",
+        type=Path,
+        help=(
+            "Optional JSON file containing specific course_key values to deep-scrape. "
+            "When provided, only matching discovered courses are targeted."
         ),
     )
     parser.add_argument(
@@ -1508,6 +1565,15 @@ def run(args: argparse.Namespace) -> int:
                 return 2
 
         try:
+            requested_course_keys = _load_course_keys_file(args.course_keys_file)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.error(
+                "course_keys_file_invalid",
+                path=str(args.course_keys_file),
+                error=str(exc),
+            )
+            return 2
+        try:
             if resume_checkpoint is not None and not args.subjects and not args.all_subjects:
                 requested_subjects = resume_checkpoint.requested_subjects
             else:
@@ -1521,7 +1587,9 @@ def run(args: argparse.Namespace) -> int:
                         args.resume_from,
                     )
 
-            if resume_checkpoint is not None and args.detail_limit is None:
+            if requested_course_keys is not None:
+                detail_limit = len(requested_course_keys)
+            elif resume_checkpoint is not None and args.detail_limit is None:
                 detail_limit = resume_checkpoint.detail_limit
             else:
                 detail_limit = max(int(args.detail_limit or 0), 0)
@@ -1760,6 +1828,10 @@ def run(args: argparse.Namespace) -> int:
                             unresolved_partitions=result.unresolved_partition_count,
                             complete=result.complete,
                         )
+                result = _filter_result_to_course_keys(
+                    result,
+                    requested_course_keys,
+                )
 
                 pending_detail_work = _resume_has_pending_detail_targets(
                     result,
