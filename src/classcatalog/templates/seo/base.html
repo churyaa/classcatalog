@@ -105,6 +105,23 @@
       <a href="/terms">Terms</a>
     </div>
   </footer>
+  <div id="theme-picker" class="theme-picker">
+    <button id="theme-picker-toggle" class="theme-picker-toggle" type="button" aria-expanded="false" aria-controls="theme-picker-panel" aria-label="Choose theme" title="Choose theme">
+      <span class="theme-toggle-swatches" aria-hidden="true">
+        <i class="theme-toggle-dot theme-toggle-background"></i>
+        <i class="theme-toggle-dot theme-toggle-accent"></i>
+        <i class="theme-toggle-dot theme-toggle-text"></i>
+        <i class="theme-toggle-dot theme-toggle-ui"></i>
+      </span>
+    </button>
+    <div id="theme-picker-panel" class="theme-picker-panel" hidden>
+      <div class="theme-picker-heading">
+        <strong>Theme</strong>
+        <span>4-color palettes</span>
+      </div>
+      <div class="theme-options" role="radiogroup" aria-label="Choose a ClassCatalog theme"></div>
+    </div>
+  </div>
   <script>
     (() => {
       const badge = document.querySelector("#favorites-count");
@@ -120,6 +137,7 @@
       }
     })();
   </script>
+  <script src="/static/seo-theme-picker.js?v=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>
