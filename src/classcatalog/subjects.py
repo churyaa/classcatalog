@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Final
 from urllib.parse import quote_plus
 
@@ -148,3 +149,136 @@ def normalize_subject_input(subject: str) -> str:
 def encoded_subject(subject: str) -> str:
     """Encode multi-word subject abbreviations safely for query parameters."""
     return quote_plus(subject)
+
+# Stable public labels/slugs used by crawlable subject landing pages. Keep these
+# independent from transient PeopleSoft facet indexes. Unknown/new subject codes
+# intentionally fall back to the normalized abbreviation until a verified label
+# is added here.
+SUBJECT_SEO_NAMES: Final[dict[str, str]] = {
+    "A E": "Aerospace Engineering",
+    "AAS": "Asian American Studies",
+    "ACCTG": "Accountancy",
+    "AFRAS": "Africana Studies",
+    "AMIND": "American Indian Studies",
+    "ANTH": "Anthropology",
+    "ARAB": "Arabic",
+    "ARP": "Administration, Rehabilitation and Postsecondary Education",
+    "ART": "Art",
+    "ASIAN": "Asian Studies",
+    "ASL": "American Sign Language",
+    "ASTR": "Astronomy",
+    "AUD": "Audiology",
+    "B A": "Business Administration",
+    "BDA": "Big Data Analytics",
+    "BIOL": "Biology",
+    "BQS": "Business Quantitative Skills",
+    "BRAZ": "Brazilian Studies",
+    "CCS": "Chicana and Chicano Studies",
+    "CFD": "Child and Family Development",
+    "CHEM": "Chemistry",
+    "CHIN": "Chinese",
+    "CIV E": "Civil Engineering",
+    "CJ": "Criminal Justice",
+    "CLASS": "Classics",
+    "COMM": "Communication",
+    "COMP": "Comparative Literature",
+    "COMPE": "Computer Engineering",
+    "CON E": "Construction Engineering",
+    "CON M": "Construction Management",
+    "CS": "Computer Science",
+    "CSP": "Counseling and School Psychology",
+    "DANCE": "Dance",
+    "DLE": "Dual Language and English Learner Education",
+    "DPT": "Doctor of Physical Therapy",
+    "E E": "Electrical Engineering",
+    "ECON": "Economics",
+    "ED": "Education",
+    "EDL": "Educational Leadership",
+    "ENGR": "Engineering",
+    "ENS": "Exercise and Nutritional Sciences",
+    "ENV E": "Environmental Engineering",
+    "ENV S": "Environmental Sciences",
+    "EUROP": "European Studies",
+    "FILIP": "Filipino",
+    "FIN": "Finance",
+    "FN": "Foods and Nutrition",
+    "FRENC": "French",
+    "GEN S": "General Studies",
+    "GEOG": "Geography",
+    "GEOL": "Geological Sciences",
+    "GERMN": "German",
+    "GERO": "Gerontology",
+    "H SEC": "Homeland Security",
+    "HEBRW": "Hebrew",
+    "HHS": "Health and Human Services",
+    "HIST": "History",
+    "HONOR": "Honors",
+    "HTM": "Hospitality and Tourism Management",
+    "HUM": "Humanities",
+    "I B": "International Business",
+    "INT S": "International Studies",
+    "ISCOR": "International Security and Conflict Resolution",
+    "ITAL": "Italian",
+    "JAPAN": "Japanese",
+    "JMS": "Journalism and Media Studies",
+    "JS": "Jewish Studies",
+    "KOR": "Korean",
+    "LATAM": "Latin American Studies",
+    "LDT": "Learning Design and Technology",
+    "LGBT": "Lesbian, Gay, Bisexual and Transgender Studies",
+    "LIB S": "Liberal Studies",
+    "LING": "Linguistics",
+    "M E": "Mechanical Engineering",
+    "M S E": "Materials Science and Engineering",
+    "MATH": "Mathematics",
+    "MGT": "Management",
+    "MIL S": "Military Science",
+    "MIS": "Management Information Systems",
+    "MKTG": "Marketing",
+    "MTHED": "Mathematics Education",
+    "MUSIC": "Music",
+    "NAV S": "Naval Science",
+    "NURS": "Nursing",
+    "OCEAN": "Oceanography",
+    "P A": "Public Administration",
+    "P H": "Public Health",
+    "PERS": "Persian",
+    "PHIL": "Philosophy",
+    "PHYS": "Physics",
+    "POL S": "Political Science",
+    "PORT": "Portuguese",
+    "PSY": "Psychology",
+    "R A": "Recreation Administration",
+    "REL S": "Religious Studies",
+    "RTM": "Recreation and Tourism Management",
+    "RUSSN": "Russian",
+    "RWS": "Rhetoric and Writing Studies",
+    "SLHS": "Speech, Language and Hearing Sciences",
+    "SOC": "Sociology",
+    "SOCSI": "Social Science",
+    "SPAN": "Spanish",
+    "SPED": "Special Education",
+    "STAT": "Statistics",
+    "STS": "Science, Technology and Society",
+    "SUSTN": "Sustainability",
+    "SWORK": "Social Work",
+    "TE": "Teacher Education",
+    "TFM": "Television, Film and New Media",
+    "THEA": "Theatre",
+    "WGSS": "Women's, Gender and Sexuality Studies",
+}
+
+_SUBJECT_SEO_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def subject_display_name(subject: str) -> str:
+    """Return a verified long name when available, otherwise the stable SDSU code."""
+    normalized = " ".join(normalize_subject_input(subject).split())
+    return SUBJECT_SEO_NAMES.get(normalized, normalized)
+
+
+def subject_slug(subject: str) -> str:
+    """Return the stable canonical subject slug used by public SEO routes."""
+    normalized = " ".join(normalize_subject_input(subject).split())
+    label = SUBJECT_SEO_NAMES.get(normalized, normalized)
+    return _SUBJECT_SEO_SLUG_RE.sub("-", label.casefold()).strip("-")

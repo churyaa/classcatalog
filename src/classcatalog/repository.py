@@ -520,6 +520,46 @@ class CourseRepository:
             )
         return grouped
 
+
+    def displayed_options(
+        self,
+        *,
+        term: str | None = None,
+        subject: str | None = None,
+        course_code: str | None = None,
+    ) -> tuple[CourseSection, ...]:
+        """Return exact, read-only enrollment options using the authoritative grouping model.
+
+        This is intentionally a projection of ``_grouped_sections`` rather than a second
+        grouping implementation. SEO pages and other read-only surfaces can therefore
+        consume the same linked-component and orphan-suppression behavior as class search.
+        """
+        normalized_term = term.strip() if term is not None else None
+        normalized_subject = (
+            " ".join(subject.strip().upper().split()) if subject is not None else None
+        )
+        normalized_course_code = (
+            " ".join(course_code.strip().upper().split())
+            if course_code is not None
+            else None
+        )
+        matched = [
+            section
+            for section in self._sections
+            if (normalized_term is None or section.term == normalized_term)
+            and (
+                normalized_subject is None
+                or " ".join(section.subject.strip().upper().split()) == normalized_subject
+            )
+            and (
+                normalized_course_code is None
+                or " ".join(section.course_code.strip().upper().split())
+                == normalized_course_code
+            )
+        ]
+        grouped = self._grouped_sections(matched)
+        return tuple(sort_sections(grouped, SearchFilters().sort_by))
+
     @staticmethod
     def _physical_key(section: CourseSection) -> tuple[str, str]:
         return (section.term_code or section.term, section.schedule_number)

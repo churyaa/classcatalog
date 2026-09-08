@@ -58,6 +58,7 @@ from classcatalog.repository import (
 from classcatalog.repository import (
     repository as default_repository,
 )
+from classcatalog.seo import SeoCatalog, SeoRenderer, build_sitemap_xml
 from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -273,6 +274,8 @@ def create_app(
     """Create the API around an explicit repository for tests and data validation."""
 
     active_repository = course_repository or default_repository
+    seo_catalog = SeoCatalog.from_repository(active_repository)
+    seo_renderer = SeoRenderer()
     active_data_path = data_path or ACTIVE_DATA_PATH
     active_catalog_path = catalog_path if catalog_path is not None else ACTIVE_CATALOG_PATH
     active_ratings_path = ratings_path if ratings_path is not None else ACTIVE_RATINGS_PATH
@@ -499,8 +502,61 @@ def create_app(
         return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
 
     @app.get("/sitemap.xml", include_in_schema=False)
-    async def sitemap_xml() -> FileResponse:
-        return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
+    async def sitemap_xml() -> Response:
+        return Response(content=build_sitemap_xml(seo_catalog), media_type="application/xml")
+
+
+    @app.get("/subjects", include_in_schema=False)
+    async def subjects_page() -> Response:
+        return Response(
+            content=seo_renderer.render_subject_index(seo_catalog),
+            media_type="text/html",
+        )
+
+    @app.get("/subjects/{slug}", include_in_schema=False)
+    async def subject_page(slug: str) -> Response:
+        subject = seo_catalog.subject_by_slug(slug.casefold())
+        if subject is None:
+            raise HTTPException(status_code=404, detail="Subject not found.")
+        if slug != subject.slug:
+            return Response(
+                status_code=308,
+                headers={"Location": f"/subjects/{subject.slug}"},
+            )
+        return Response(
+            content=seo_renderer.render_subject(seo_catalog, subject),
+            media_type="text/html",
+        )
+
+    @app.get("/courses/{slug}", include_in_schema=False)
+    async def course_page(slug: str) -> Response:
+        course = seo_catalog.course_by_slug(slug.casefold())
+        if course is None or seo_catalog.primary_term is None:
+            raise HTTPException(status_code=404, detail="Course not found.")
+        if slug != course.slug:
+            return Response(
+                status_code=308,
+                headers={"Location": f"/courses/{course.slug}"},
+            )
+
+        options = active_repository.displayed_options(
+            term=seo_catalog.primary_term,
+            course_code=course.course_code,
+        )
+        if not options:
+            raise HTTPException(status_code=404, detail="Course not found.")
+
+        if active_seat_service is not None:
+            schedules: list[str] = []
+            for option in options:
+                schedules.append(option.schedule_number)
+                schedules.extend(component.schedule_number for component in option.linked_components)
+            active_seat_service.register_interest(tuple(schedules))
+
+        return Response(
+            content=seo_renderer.render_course(seo_catalog, course, options),
+            media_type="text/html",
+        )
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

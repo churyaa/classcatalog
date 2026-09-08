@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <nav class="seo-breadcrumbs" aria-label="Breadcrumb">
+    <a href="/">Home</a><span aria-hidden="true">›</span><a href="/subjects">Subjects</a><span aria-hidden="true">›</span><span aria-current="page">{{ subject.name }}</span>
+  </nav>
+
+  <header class="seo-compact-header">
+    <p class="eyebrow">{{ subject.code }} · San Diego State University</p>
+    <h1>SDSU {{ subject.name }} Classes</h1>
+    <p>{{ term }} · {{ subject.course_count }} course{% if subject.course_count != 1 %}s{% endif %} · {{ subject.option_count }} enrollment option{% if subject.option_count != 1 %}s{% endif %}</p>
+  </header>
+
+  <section aria-labelledby="subject-courses-title">
+    <h2 id="subject-courses-title" class="seo-visually-subtle">{{ subject.name }} courses</h2>
+    <div class="seo-table-wrap">
+      <table class="seo-course-table">
+        <thead>
+          <tr>
+            <th scope="col">Course</th>
+            <th scope="col">Title</th>
+            <th scope="col">Units</th>
+            <th scope="col">Options</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for course in subject.courses %}
+          <tr>
+            <td class="seo-course-code-cell"><a href="/courses/{{ course.slug }}">{{ course.course_code }}</a></td>
+            <td><a class="seo-course-title-link" href="/courses/{{ course.slug }}">{{ course.title or course.course_code }}</a></td>
+            <td>{{ course.units_text }}</td>
+            <td>{{ course.option_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

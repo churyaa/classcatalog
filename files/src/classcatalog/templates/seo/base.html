@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }}</title>
+  <meta name="description" content="{{ meta_description }}">
+  <link rel="icon" type="image/svg+xml" href="/static/classcatalog_outline_cc_logo_v5.svg">
+  <link rel="shortcut icon" href="/static/classcatalog_outline_cc_logo_v5.svg">
+  <script>
+    (() => {
+      const cookieName = "classcatalog_theme";
+      const encodedName = `${encodeURIComponent(cookieName)}=`;
+      const match = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(encodedName));
+      let savedTheme = "";
+      if (match) {
+        try { savedTheme = decodeURIComponent(match.slice(encodedName.length)); } catch (_error) {}
+      }
+      if (!savedTheme) {
+        try {
+          savedTheme = localStorage.getItem("classcatalog_theme_v1") || "";
+          if (savedTheme) {
+            let cookie = `${encodedName}${encodeURIComponent(savedTheme)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+            if (window.location.protocol === "https:") cookie += "; Secure";
+            document.cookie = cookie;
+            localStorage.removeItem("classcatalog_theme_v1");
+          }
+        } catch (_error) {}
+      }
+      if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/styles.css?v=60">
+  <link rel="stylesheet" href="/static/seo.css?v=2">
+  <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
+  <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta name="robots" content="index,follow">
+  <meta property="og:site_name" content="ClassCatalog">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ page_title }}">
+  <meta property="og:description" content="{{ meta_description }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ page_title }}">
+  <meta name="twitter:description" content="{{ meta_description }}">
+  <script type="application/ld+json" id="classcatalog-breadcrumb-schema">{{ schema_json | safe }}</script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand-wrap seo-brand" href="/" aria-label="ClassCatalog home">
+        <span class="brand-logo" aria-hidden="true"></span>
+        <span class="seo-brand-title">classcatalog</span>
+      </a>
+      <nav class="header-actions" aria-label="Primary navigation">
+        <a class="header-nav-button" href="/">Home</a>
+        <a class="header-nav-button" href="/subjects">Browse Subjects</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="seo-page-shell">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>Planning aid only. Always verify prerequisites, enrollment rules, meeting details, and seat status with SDSU.</p>
+      <a href="/">Home</a>
+      <a href="/subjects">Browse Subjects</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </div>
+  </footer>
+  <script src="/static/cookie-consent.js?v=1" defer></script>
+</body>
+</html>

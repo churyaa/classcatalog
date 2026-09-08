@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+  <nav class="seo-breadcrumbs" aria-label="Breadcrumb">
+    <a href="/">Home</a><span aria-hidden="true">›</span><a href="/subjects">Subjects</a><span aria-hidden="true">›</span><a href="/subjects/{{ course.subject_slug }}">{{ course.subject_name }}</a><span aria-hidden="true">›</span><span aria-current="page">{{ course.course_code }}</span>
+  </nav>
+
+  <header class="seo-course-header">
+    <p class="eyebrow">{{ course.subject_name }} · {{ term }}</p>
+    <h1>SDSU {{ course.course_code }}{% if course.title %} — {{ course.title }}{% endif %}</h1>
+    <div class="seo-course-meta">
+      <span><strong>{{ course.units_text }}</strong> units</span>
+      <span><strong>{{ options | length }}</strong> enrollment option{% if options | length != 1 %}s{% endif %}</span>
+    </div>
+    {% if course.description %}<p class="seo-course-description">{{ course.description }}</p>{% endif %}
+  </header>
+
+  {% if course.prerequisite_text or course.enrollment_requirements %}
+  <details class="seo-requirements">
+    <summary>Course requirements</summary>
+    <div class="seo-requirements-body">
+      {% if course.prerequisite_text %}<p><strong>Prerequisites:</strong> {{ course.prerequisite_text }}</p>{% endif %}
+      {% if course.enrollment_requirements %}
+      <ul>{% for requirement in course.enrollment_requirements %}<li>{{ requirement }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  <section aria-labelledby="enrollment-options-title">
+    <div class="seo-section-heading seo-section-heading-compact">
+      <h2 id="enrollment-options-title">{{ term }} enrollment options</h2>
+      <span>Seat status can change</span>
+    </div>
+    <div class="seo-table-wrap">
+      <table class="seo-option-table">
+        <thead>
+          <tr>
+            <th scope="col">Class #</th>
+            <th scope="col">Format</th>
+            <th scope="col">Status</th>
+            <th scope="col">Seats</th>
+            <th scope="col">Time</th>
+            <th scope="col">Location</th>
+            <th scope="col">Professor</th>
+            <th scope="col">RateMyProfessors</th>
+          </tr>
+        </thead>
+        {% for option in options %}
+        <tbody class="seo-option-group">
+          {% set class_rows = option.linked_components if option.linked_components else [option] %}
+          {% for row in class_rows %}
+          <tr>
+            <td class="seo-class-number">
+              <strong>{{ row.schedule_number }}</strong>
+              {% if row.component %}<small>{{ row.component }}</small>{% endif %}
+            </td>
+            <td>{{ row.instruction_mode | instruction_mode }}</td>
+            <td><span class="seo-status seo-status-{{ row.seat_status.value }}">{{ row.seat_status | seat_status }}</span></td>
+            <td>{{ row | seat_count }}</td>
+            <td class="seo-time-cell">
+              {% if row.meetings %}
+                {% for meeting in row.meetings %}<span>{{ meeting | meeting_time }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+              {% else %}TBA{% endif %}
+            </td>
+            <td class="seo-location-cell">
+              {% if row.meetings %}
+                {% for meeting in row.meetings %}<span>{{ meeting.location or row.location or 'TBA' }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+              {% else %}{{ row.location or 'TBA' }}{% endif %}
+            </td>
+            <td>{{ row.instructor or 'TBA' }}</td>
+            <td class="seo-rmp-cell">
+              {% if row.professor %}
+                {% if row.professor.profile_url %}<a href="{{ row.professor.profile_url }}" target="_blank" rel="noopener noreferrer">{% endif %}
+                <span class="seo-rmp-primary">
+                  {% if row.professor.rating is not none %}{{ '%.1f' | format(row.professor.rating) }}/5{% else %}No rating{% endif %}
+                  {% if row.professor.num_reviews %} · {{ row.professor.num_reviews }} review{% if row.professor.num_reviews != 1 %}s{% endif %}{% endif %}
+                </span>
+                <small>
+                  {% if row.professor.difficulty is not none %}Difficulty {{ '%.1f' | format(row.professor.difficulty) }}{% endif %}
+                  {% if row.professor.would_take_again_percent is not none %}{% if row.professor.difficulty is not none %} · {% endif %}{{ row.professor.would_take_again_percent | round | int }}% take again{% endif %}
+                </small>
+                {% if row.professor.profile_url %}</a>{% endif %}
+              {% else %}<span class="seo-rmp-unmatched">No RateMyProfessor match available</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <p class="seo-back-link"><a href="/subjects/{{ course.subject_slug }}">Browse all {{ course.subject_name }} courses</a></p>
+{% endblock %}

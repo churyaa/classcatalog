@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+  <nav class="seo-breadcrumbs" aria-label="Breadcrumb">
+    <a href="/">Home</a><span aria-hidden="true">›</span><span aria-current="page">Subjects</span>
+  </nav>
+
+  <header class="seo-compact-header">
+    <p class="eyebrow">San Diego State University · {{ term }}</p>
+    <h1>SDSU Subjects</h1>
+    <p>Browse {{ subjects | length }} subjects and their current course offerings.</p>
+  </header>
+
+  <section aria-labelledby="subject-directory-title">
+    <h2 id="subject-directory-title" class="seo-visually-subtle">Subjects</h2>
+    <div class="seo-subject-grid">
+      {% for subject in subjects %}
+      <a class="seo-subject-card" href="/subjects/{{ subject.slug }}">
+        <span class="seo-subject-label"><strong>{{ subject.code }}</strong> - {{ subject.name }}</span>
+        <span class="seo-subject-count">{{ subject.course_count }} course{% if subject.course_count != 1 %}s{% endif %}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

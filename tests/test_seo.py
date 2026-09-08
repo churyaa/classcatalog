@@ -32,11 +32,16 @@ def test_root_robots_and_sitemap_are_public() -> None:
     namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
     urls = [node.text for node in root.findall("sm:url/sm:loc", namespace)]
 
-    assert urls == [
+    assert urls[:4] == [
         "https://classcatalog.cc/",
         "https://classcatalog.cc/privacy",
         "https://classcatalog.cc/terms",
+        "https://classcatalog.cc/subjects",
     ]
+    assert any(url.startswith("https://classcatalog.cc/subjects/") for url in urls)
+    assert any(url.startswith("https://classcatalog.cc/courses/") for url in urls)
+    assert len(urls) == len(set(urls))
+    assert all("?" not in url and "#" not in url for url in urls)
 
 
 def test_homepage_has_search_metadata_and_structured_data() -> None:
