@@ -127,6 +127,8 @@ function normalizeTheme(themeId) {
 
 function applyTheme(themeId) {
   document.documentElement.dataset.theme = normalizeTheme(themeId);
+  window.ClassCatalogThemeFavicon?.sync();
+  if (window.ClassCatalogBrand) window.ClassCatalogBrand.syncThemeAssets();
 }
 
 function syncThemePicker(themeId) {

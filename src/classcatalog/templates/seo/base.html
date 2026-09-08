@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ page_title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/classcatalog_favicon.svg?v=1" data-theme-favicon>
+  <link rel="shortcut icon" href="/static/classcatalog_favicon.svg?v=1" data-theme-favicon>
+  <link rel="mask-icon" href="/static/classcatalog_favicon.svg?v=1" color="#a6192e" data-theme-favicon-mask>
+<title>{{ page_title }}</title>
   <meta name="description" content="{{ meta_description }}">
-  <link rel="icon" type="image/svg+xml" href="/static/classcatalog_outline_cc_logo_v5.svg">
-  <link rel="shortcut icon" href="/static/classcatalog_outline_cc_logo_v5.svg">
-  <script>
+<script>
     (() => {
       const cookieName = "classcatalog_theme";
       const encodedName = `${encodeURIComponent(cookieName)}=`;
@@ -33,7 +34,7 @@
       if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=60&amp;header=3&amp;filters=4&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1">
+  <link rel="stylesheet" href="/static/styles.css?v=60&amp;header=3&amp;filters=4&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1">
   <link rel="stylesheet" href="/static/seo.css?v=3">
   <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
   <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
@@ -49,6 +50,7 @@
   <meta name="twitter:title" content="{{ page_title }}">
   <meta name="twitter:description" content="{{ meta_description }}">
   <script type="application/ld+json" id="classcatalog-breadcrumb-schema">{{ schema_json | safe }}</script>
+  <script src="/static/theme-favicon.js?v=1" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -137,7 +139,8 @@
       }
     })();
   </script>
-  <script src="/static/seo-theme-picker.js?v=1" defer></script>
+    <script src="/static/theme-brand.js?v=1" defer></script>
+<script src="/static/seo-theme-picker.js?v=2" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>

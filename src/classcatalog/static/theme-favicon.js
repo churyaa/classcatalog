@@ -1,0 +1,41 @@
+(() => {
+  const svgTemplate = `<svg style="color:__THEME_COLOR__" height="700pt" preserveAspectRatio="xMidYMid meet" viewBox="0 0 700 700" width="700pt" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" fill-rule="evenodd" d="m1539 6986c-2-2-26-6-54-9-177-19-451-124-638-244-487-314-792-800-821-1313-30-518-30-3420-1-3825 13-174 18-210 52-325 136-469 470-864 920-1085 117-57 201-89 364-139l106-32 2044 1 2044 1 165 56c384 129 623 285 863 562 164 190 320 500 362 721 46 237 50 420 50 2130 0 1354-5 1789-21 1940-3 28-6 57-6 65 1 55-45 258-74 338-48 128-153 329-222 426-112 157-376 399-547 502-85 51-213 109-380 172l-160 60-2021 1c-1112 0-2023-1-2025-3z M3100 3850 C2850 4200 2500 4380 2100 4380 C1350 4380 1000 3850 1000 3200 C1000 2550 1350 2050 2100 2050 C2500 2050 2850 2230 3100 2580 L2700 2900 C2550 2680 2350 2550 2100 2550 C1750 2550 1530 2800 1530 3200 C1530 3600 1750 3880 2100 3880 C2350 3880 2550 3750 2700 3530 Z M5700 3850 C5450 4200 5100 4380 4700 4380 C3950 4380 3600 3850 3600 3200 C3600 2550 3950 2050 4700 2050 C5100 2050 5450 2230 5700 2580 L5300 2900 C5150 2680 4950 2550 4700 2550 C4350 2550 4130 2800 4130 3200 C4130 3600 4350 3880 4700 3880 C4950 3880 5150 3750 5300 3530 Z" transform="matrix(.1 0 0 -.1 0 700)"/></svg>`;
+
+  function xmlAttributeEscape(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  function currentAccentColor() {
+    const accent = window.getComputedStyle(document.documentElement)
+      .getPropertyValue("--theme-accent")
+      .trim();
+    return accent || "#a6192e";
+  }
+
+  function themedFaviconHref(color) {
+    const svg = svgTemplate.replace("__THEME_COLOR__", xmlAttributeEscape(color));
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  function sync() {
+    const color = currentAccentColor();
+    const href = themedFaviconHref(color);
+
+    document.querySelectorAll("link[data-theme-favicon]").forEach((link) => {
+      link.href = href;
+    });
+
+    document.querySelectorAll("link[data-theme-favicon-mask]").forEach((link) => {
+      link.href = href;
+      link.setAttribute("color", color);
+    });
+  }
+
+  window.ClassCatalogThemeFavicon = Object.freeze({ sync });
+  sync();
+  window.addEventListener("load", sync, { once: true });
+})();

@@ -534,8 +534,8 @@ button, select, input { color: inherit; }
   width: 3.25rem;
   height: 2.5rem;
   background: var(--theme-accent);
-  -webkit-mask: url("/static/classcatalog_outline_cc_logo_v5.svg?v=3") center / contain no-repeat;
-  mask: url("/static/classcatalog_outline_cc_logo_v5.svg?v=3") center / contain no-repeat;
+  -webkit-mask: url("/static/classcatalog_cc_logo.svg?v=1") center / contain no-repeat;
+  mask: url("/static/classcatalog_cc_logo.svg?v=1") center / contain no-repeat;
 }
 .site-header h1 {
   margin: 0;

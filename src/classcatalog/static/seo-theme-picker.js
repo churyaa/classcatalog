@@ -98,6 +98,8 @@
 
   function applyTheme(themeId) {
     root.dataset.theme = normalizeTheme(themeId);
+    window.ClassCatalogThemeFavicon?.sync();
+  if (window.ClassCatalogBrand) window.ClassCatalogBrand.syncThemeAssets();
   }
 
   function persistTheme(themeId) {
