@@ -494,6 +494,14 @@ def create_app(
     async def terms_page() -> FileResponse:
         return FileResponse(STATIC_DIR / "terms.html")
 
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots_txt() -> FileResponse:
+        return FileResponse(STATIC_DIR / "robots.txt", media_type="text/plain")
+
+    @app.get("/sitemap.xml", include_in_schema=False)
+    async def sitemap_xml() -> FileResponse:
+        return FileResponse(STATIC_DIR / "sitemap.xml", media_type="application/xml")
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
