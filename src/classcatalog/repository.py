@@ -9,6 +9,7 @@ from threading import RLock
 
 from classcatalog.catalog.repository import CatalogRepository
 from classcatalog.filters import SearchFilters, matches, normalize_campus, sort_sections
+from classcatalog.instructors import apply_cached_instructors
 from classcatalog.models import (
     CourseComponent,
     CourseLookupOption,
@@ -24,6 +25,7 @@ from classcatalog.models import (
 )
 from classcatalog.ratings import (
     apply_cached_ratings,
+    is_placeholder_instructor,
     load_ratings_metrics,
     normalize_person_name,
 )
@@ -92,6 +94,7 @@ class CourseRepository:
     ) -> CourseRepository:
         raw = json.loads(path.read_text(encoding="utf-8"))
         sections = tuple(CourseSection.model_validate(item) for item in raw)
+        sections, _ = apply_cached_instructors(sections)
         embedded_professors = {section.id: section.professor for section in sections}
         effective_ratings_path = ratings_path if ratings_path is not None else resolve_ratings_path()
         ratings_load_error = None
@@ -180,6 +183,45 @@ class CourseRepository:
             self._ratings_record_count = record_count
             self._ratings_load_error = None
         return changed
+
+
+    def apply_instructor_updates(
+        self,
+        updates: Mapping[tuple[str, str], str],
+    ) -> int:
+        """Upgrade placeholder instructors without overwriting known assignments.
+
+        Live SDSU refreshes are intentionally one-way: a blank/TBA/Staff instructor can
+        become a named instructor, but a named instructor is never replaced by this
+        lightweight refresher. Full dataset rebuilds remain authoritative for other
+        instructor changes.
+        """
+
+        if not updates:
+            return 0
+        normalized = {
+            key: " ".join(str(value or "").strip().split())
+            for key, value in updates.items()
+            if not is_placeholder_instructor(str(value or ""))
+        }
+        if not normalized:
+            return 0
+
+        changed_physical: set[tuple[str, str]] = set()
+        with self._lock:
+            replaced: list[CourseSection] = []
+            for section in self._sections:
+                key = self._physical_key(section)
+                instructor = normalized.get(key)
+                if instructor is None or not is_placeholder_instructor(section.instructor):
+                    replaced.append(section)
+                    continue
+                candidate = section.model_copy(update={"instructor": instructor, "professor": None})
+                if candidate != section:
+                    changed_physical.add(key)
+                replaced.append(candidate)
+            self._sections = tuple(replaced)
+        return len(changed_physical)
 
 
     def apply_seat_updates(

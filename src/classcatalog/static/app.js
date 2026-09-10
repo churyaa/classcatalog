@@ -421,6 +421,7 @@ function applySeatRecord(target, record) {
     seats_available: record.seats_available ?? target.seats_available,
     seat_capacity: record.seat_capacity ?? target.seat_capacity,
     seats_enrolled: record.seats_enrolled ?? target.seats_enrolled,
+    instructor: record.instructor ?? target.instructor,
     seat_updated_at: record.updated_at ?? target.seat_updated_at,
   };
 }
@@ -1783,6 +1784,15 @@ function renderAdminHealth(data) {
       adminMetric("No meeting rows", adminNumber(missingMeetings), { tone: missingMeetings ? "warning" : "good", note: "physical sections" }),
     ].join("");
   }
+  const tbaRefreshButton = document.querySelector("#admin-instructor-refresh-tba");
+  if (tbaRefreshButton) {
+    const seatRefresh = data?.seat_refresh || {};
+    const refreshableTba = Number(seatRefresh.tba_instructor_physical_sections) || 0;
+    tbaRefreshButton.textContent = refreshableTba
+      ? `Refresh TBA Professors (${adminNumber(refreshableTba)})`
+      : "Refresh TBA Professors";
+    tbaRefreshButton.disabled = !seatRefresh.enabled || refreshableTba === 0;
+  }
 
   const catalog = data?.catalog || {};
   const catalogMetrics = document.querySelector("#admin-catalog-metrics");
@@ -1836,6 +1846,39 @@ function renderAdminHealth(data) {
           <small>Reference ${escapeHtml(item.request_id || "not available")}</small>
         </article>`).join("")
       : '<p class="admin-errors-empty">No server errors have been recorded since this process started.</p>';
+  }
+}
+
+async function refreshTbaProfessorsNow() {
+  const button = document.querySelector("#admin-instructor-refresh-tba");
+  const result = document.querySelector("#admin-instructor-refresh-result");
+  if (!button) return;
+  button.disabled = true;
+  if (result) {
+    result.textContent = "Finding course pages that still have TBA professors…";
+    result.className = "admin-seat-refresh-result";
+  }
+  try {
+    const payload = await fetchJson("/api/admin/instructors/refresh-tba", {
+      method: "POST",
+      cache: "no-store",
+    }, { fallbackMessage: "TBA professor refresh could not be queued.", allowDetail: true });
+    const pages = Number(payload.queued_course_pages) || 0;
+    const sections = Number(payload.tba_physical_sections) || 0;
+    if (result) {
+      result.textContent = pages
+        ? `Queued ${pages} SDSU course page${pages === 1 ? "" : "s"} covering ${sections} TBA physical section${sections === 1 ? "" : "s"}.`
+        : "No refreshable TBA professor sections remain.";
+      result.className = "admin-seat-refresh-result is-success";
+    }
+    await loadAdminHealth();
+  } catch (err) {
+    if (result) {
+      result.textContent = safeErrorMessage(err, "TBA professor refresh could not be queued.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -2810,6 +2853,8 @@ async function boot() {
   if (adminRefresh) adminRefresh.addEventListener("click", loadAdminHealth);
   const adminSeatRefresh = document.querySelector("#admin-seat-refresh-now");
   if (adminSeatRefresh) adminSeatRefresh.addEventListener("click", refreshAllSeatsNow);
+  const adminInstructorRefresh = document.querySelector("#admin-instructor-refresh-tba");
+  if (adminInstructorRefresh) adminInstructorRefresh.addEventListener("click", refreshTbaProfessorsNow);
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
   setupAdminSeatCoursePicker();

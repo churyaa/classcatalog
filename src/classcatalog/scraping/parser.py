@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 
 from bs4 import BeautifulSoup, Tag
 
+from classcatalog.instructors import clean_live_instructor_name
 from classcatalog.models import GradingType, SeatStatus, Weekday
 from classcatalog.scraping.constants import RESULT_LIMIT
 from classcatalog.scraping.models import (
@@ -779,10 +780,12 @@ def parse_course_info_page(
             row,
             r"SSR_CLSRCH_F_WK_SSR_MTG_LOC_LONG_1",
         )
-        instructor = _tag_text_by_id_pattern(
-            row,
-            r"SSR_CLSRCH_F_WK_SSR_INSTR_LONG_1",
-        )
+        instructor = clean_live_instructor_name(
+            _tag_text_by_id_pattern(
+                row,
+                r"SSR_CLSRCH_F_WK_SSR_INSTR_LONG_1",
+            )
+        ) or None
         seats_text = _tag_text_by_id_pattern(
             row,
             r"SSR_CLSRCH_F_WK_SSR_DESCR50_1",

@@ -32,6 +32,7 @@ src/classcatalog/data/sections.json
 src/classcatalog/data/catalog_mappings.json
 src/classcatalog/data/professor_ratings.json
 src/classcatalog/data/seat_cache.json
+src/classcatalog/data/instructor_cache.json
 
 # Local handoff and update notes
 /*-NOTES.md

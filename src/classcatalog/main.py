@@ -637,6 +637,7 @@ def create_app(
                     "seats_available": section.seats_available,
                     "seat_capacity": section.seat_capacity,
                     "seats_enrolled": section.seats_enrolled,
+                    "instructor": section.instructor,
                     "updated_at": None,
                 }
                 for (_term, schedule), section in active_repository.seat_snapshot(requested).items()
@@ -822,6 +823,25 @@ def create_app(
             "deleted": True,
             "instructor_name": removed.get("name"),
             "updated_section_listings": changed_sections,
+        }
+
+    @app.post("/api/admin/instructors/refresh-tba")
+    async def admin_refresh_tba_instructors(
+        request: Request,
+        response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        if active_seat_service is None or not active_seat_service.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Targeted instructor refreshing is not available for this dataset.",
+            )
+        queued_pages, tba_sections = active_seat_service.request_tba_instructor_refresh()
+        return {
+            "accepted": True,
+            "queued_course_pages": queued_pages,
+            "tba_physical_sections": tba_sections,
         }
 
     @app.post("/api/admin/seats/refresh")

@@ -12,7 +12,14 @@ import time
 from typing import Mapping, Sequence
 from urllib.parse import urlencode, urlparse
 
+from classcatalog.instructors import (
+    clean_live_instructor_name,
+    load_instructor_cache,
+    resolve_instructor_cache_path,
+    write_instructor_cache,
+)
 from classcatalog.models import SeatStatus
+from classcatalog.ratings import is_placeholder_instructor
 from classcatalog.repository import CourseRepository
 from classcatalog.scraping.constants import DETAIL_URL, INSTITUTION_CODE
 from classcatalog.scraping.course_option_pagination import CourseOptionPaginationError
@@ -117,6 +124,7 @@ class SeatRefreshService:
         repository: CourseRepository,
         *,
         cache_path: Path | None = None,
+        instructor_cache_path: Path | None = None,
         request_delay_seconds: float | None = None,
         priority_interval_seconds: float | None = None,
         interest_ttl_seconds: float | None = None,
@@ -126,6 +134,7 @@ class SeatRefreshService:
     ) -> None:
         self.repository = repository
         self.cache_path = cache_path or resolve_seat_cache_path()
+        self.instructor_cache_path = instructor_cache_path or resolve_instructor_cache_path()
         self.request_delay_seconds = (
             request_delay_seconds
             if request_delay_seconds is not None
@@ -152,6 +161,11 @@ class SeatRefreshService:
             else _env_int(SEAT_STALE_AFTER_ENV, DEFAULT_STALE_AFTER_SECONDS, minimum=60)
         )
         self._session_factory = session_factory or self._default_session_factory
+        self._instructor_records = load_instructor_cache(self.instructor_cache_path)
+        self.repository.apply_instructor_updates({
+            key: str(raw.get("instructor") or "")
+            for key, raw in self._instructor_records.items()
+        })
         self._lock = RLock()
         self._stop = Event()
         self._wake = Event()
@@ -181,6 +195,7 @@ class SeatRefreshService:
         self._last_course: str | None = None
         self._last_refresh_duration_seconds: float | None = None
         self._last_sections_updated = 0
+        self._last_instructor_updates = 0
         self._successful_sources = 0
         self._failed_sources = 0
         self._requests_completed = 0
@@ -354,6 +369,42 @@ class SeatRefreshService:
 
         self._wake.set()
         return len(candidates)
+
+    def _tba_instructor_targets(
+        self,
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]], set[str]]:
+        all_physical: set[tuple[str, str]] = set()
+        refreshable_physical: set[tuple[str, str]] = set()
+        source_urls: set[str] = set()
+        for section in self.repository.sections:
+            if not is_placeholder_instructor(section.instructor):
+                continue
+            key = (section.term_code or section.term, section.schedule_number)
+            all_physical.add(key)
+            source_url = str(section.source_url or "")
+            if source_url in self._sources:
+                refreshable_physical.add(key)
+                source_urls.add(source_url)
+        return all_physical, refreshable_physical, source_urls
+
+    def request_tba_instructor_refresh(self) -> tuple[int, int]:
+        """Queue only course pages that still contain placeholder instructors."""
+
+        _all_physical, refreshable_physical, source_urls = self._tba_instructor_targets()
+        with self._lock:
+            candidates = sorted(
+                source_urls,
+                key=lambda url: self._source_last_success.get(url, 0.0),
+            )
+            for url in candidates:
+                try:
+                    self._manual_queue.remove(url)
+                except ValueError:
+                    pass
+            self._manual_queue.extendleft(reversed(candidates))
+        if candidates:
+            self._wake.set()
+        return len(candidates), len(refreshable_physical)
 
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
@@ -533,6 +584,9 @@ class SeatRefreshService:
                         self._dirty = True
             updates: dict[tuple[str, str], dict[str, object]] = {}
             cache_rows: dict[tuple[str, str], dict[str, object]] = {}
+            instructor_updates: dict[tuple[str, str], str] = {}
+            instructor_cache_rows: dict[tuple[str, str], dict[str, object]] = {}
+            current_sections = self.repository.seat_snapshot(())
             refreshed_at = _utc_now()
             for option in parsed.options:
                 class_number = option.class_number.strip()
@@ -541,6 +595,22 @@ class SeatRefreshService:
                 term_key = source.schedule_to_term.get(class_number)
                 if term_key is None:
                     continue
+                key = (term_key, class_number)
+                current = current_sections.get(key)
+                refreshed_instructor = clean_live_instructor_name(option.instructor)
+                if (
+                    current is not None
+                    and is_placeholder_instructor(current.instructor)
+                    and not is_placeholder_instructor(refreshed_instructor)
+                ):
+                    instructor_updates[key] = refreshed_instructor
+                    instructor_cache_rows[key] = {
+                        "term": term_key,
+                        "schedule_number": class_number,
+                        "instructor": refreshed_instructor,
+                        "updated_at": refreshed_at,
+                        "source_url": source_url,
+                    }
                 if (
                     option.status is SeatStatus.UNKNOWN
                     and option.open_seats is None
@@ -548,7 +618,6 @@ class SeatRefreshService:
                     and option.seats_enrolled is None
                 ):
                     continue
-                key = (term_key, class_number)
                 # Open seats are authoritative for the transition users care about
                 # most. PeopleSoft can briefly leave an old Waitlist/Closed label in
                 # the row while simultaneously reporting newly available seats.
@@ -578,6 +647,14 @@ class SeatRefreshService:
                     "source_url": source_url,
                 }
 
+            changed_instructors = self.repository.apply_instructor_updates(instructor_updates)
+            if changed_instructors:
+                with self._lock:
+                    self._instructor_records.update(instructor_cache_rows)
+                try:
+                    write_instructor_cache(self._instructor_records, self.instructor_cache_path)
+                except OSError as exc:
+                    LOGGER.warning("instructor_cache_write_failed error=%s", exc)
             changed = self.repository.apply_seat_updates(updates)
             completed_at = time.time()
             with self._lock:
@@ -589,6 +666,7 @@ class SeatRefreshService:
                 self._last_success_at = completed_at
                 self._last_error = None
                 self._last_sections_updated = len(cache_rows)
+                self._last_instructor_updates = changed_instructors
                 self._successful_sources += 1
                 self._requests_completed += 1 + loaded.expansion_count
                 self._cycle_seen.add(source_url)
@@ -732,6 +810,7 @@ class SeatRefreshService:
 
     def admin_status(self) -> dict[str, object]:
         public = self.public_status()
+        all_tba, refreshable_tba, tba_sources = self._tba_instructor_targets()
         with self._lock:
             failures: list[dict[str, object]] = []
             for source_url, retained in reversed(self._failure_history.items()):
@@ -765,6 +844,11 @@ class SeatRefreshService:
                     "last_error": self._last_error,
                     "last_refresh_duration_seconds": self._last_refresh_duration_seconds,
                     "last_sections_updated": self._last_sections_updated,
+                    "last_instructor_updates": self._last_instructor_updates,
+                    "tba_instructor_physical_sections": len(refreshable_tba),
+                    "all_tba_instructor_physical_sections": len(all_tba),
+                    "tba_instructor_course_pages": len(tba_sources),
+                    "instructor_cache_records": len(self._instructor_records),
                     "successful_course_refreshes": self._successful_sources,
                     "failed_course_refreshes": self._failed_sources,
                     "requests_completed": self._requests_completed,
@@ -793,6 +877,7 @@ class SeatRefreshService:
                 "seats_available": section.seats_available,
                 "seat_capacity": section.seat_capacity,
                 "seats_enrolled": section.seats_enrolled,
+                "instructor": section.instructor,
                 "updated_at": section.seat_updated_at or cached.get("updated_at"),
             }
         return records
