@@ -52,7 +52,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--install-api-data",
         action="store_true",
-        help="Atomically install the built sections.json as the API's active data file.",
+        help=(
+            "Atomically replace only the built term in the API's active data file, "
+            "preserving every other installed term."
+        ),
     )
     parser.add_argument(
         "--api-data-path",
@@ -98,6 +101,17 @@ def main() -> int:
         return 2
 
     report = result.report
+    if result.install_summary is not None:
+        install = result.install_summary
+        print(
+            "api_data_term_installed "
+            f"term={install.term!r} term_code={install.term_code!r} "
+            f"incoming_sections={install.incoming_sections} "
+            f"replaced_sections={install.replaced_sections} "
+            f"preserved_sections={install.preserved_sections} "
+            f"active_sections={install.active_sections} "
+            f"active_terms={list(install.active_terms)!r}"
+        )
     for item in report.inventory_diff.only_in_discovery:
         print(
             "inventory_only_in_discovery "

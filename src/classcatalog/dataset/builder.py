@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from classcatalog.dataset.install import TermInstallSummary, install_term_sections
 from classcatalog.dataset.models import (
     DatasetBuildReport,
     DatasetCounts,
@@ -69,6 +69,7 @@ class DatasetBuildConfig:
 class DatasetBuildResult:
     report: DatasetBuildReport
     exit_code: int
+    install_summary: TermInstallSummary | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1802,6 +1803,7 @@ def build_production_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
 
     can_publish = errors == 0 or not config.strict
     installed_to: str | None = None
+    install_summary: TermInstallSummary | None = None
 
     if can_publish:
         ordered_courses = sorted(
@@ -1825,12 +1827,7 @@ def build_production_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
         _write_model_array(sections_path, ordered_sections)
 
         if errors == 0 and config.api_data_path is not None:
-            config.api_data_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = config.api_data_path.with_suffix(
-                f"{config.api_data_path.suffix}.tmp"
-            )
-            shutil.copyfile(sections_path, temporary)
-            temporary.replace(config.api_data_path)
+            install_summary = install_term_sections(sections_path, config.api_data_path)
             installed_to = str(config.api_data_path)
 
     report = DatasetBuildReport(
@@ -1884,4 +1881,8 @@ def build_production_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
         _write_json(manifest_path, manifest.model_dump(mode="json"))
 
     exit_code = 0 if errors == 0 else 1
-    return DatasetBuildResult(report=report, exit_code=exit_code)
+    return DatasetBuildResult(
+        report=report,
+        exit_code=exit_code,
+        install_summary=install_summary,
+    )
