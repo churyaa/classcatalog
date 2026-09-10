@@ -15,7 +15,7 @@ def test_seo_pages_include_normal_theme_picker_control() -> None:
     assert 'id="theme-picker-panel" class="theme-picker-panel" hidden' in html
     assert 'class="theme-toggle-swatches"' in html
     assert 'class="theme-options" role="radiogroup"' in html
-    assert '/static/seo-theme-picker.js?v=1' in html
+    assert '/static/seo-theme-picker.js?v=2' in html
 
 
 def test_seo_theme_picker_uses_existing_cookie_and_interaction_model() -> None:

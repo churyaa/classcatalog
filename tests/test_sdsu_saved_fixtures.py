@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,30 @@ from classcatalog.scraping.facet_parser import SubjectFacetNotFound, find_subjec
 from classcatalog.scraping.parser import has_no_results_message, parse_result_rows
 
 LIVE_ROOT = Path("fixtures/sdsu/live")
-METADATA_FILES = tuple(sorted(LIVE_ROOT.glob("**/metadata.json")))
+
+RUN_LIVE_FIXTURE_AUDIT = (
+        os.getenv("CLASSCATALOG_TEST_LIVE_FIXTURES", "")
+        .strip()
+        .casefold()
+        in {"1", "true", "yes", "on"}
+)
+
+METADATA_FILES = (
+    tuple(sorted(LIVE_ROOT.glob("**/metadata.json")))
+    if RUN_LIVE_FIXTURE_AUDIT
+    else ()
+)
 
 
-@pytest.mark.skipif(not METADATA_FILES, reason="Run the scraper with --save-fixtures first.")
+@pytest.mark.skipif(
+    not RUN_LIVE_FIXTURE_AUDIT,
+    reason="Set CLASSCATALOG_TEST_LIVE_FIXTURES=1 to audit saved live SDSU fixtures.",
+)
+@pytest.mark.skipif(
+    RUN_LIVE_FIXTURE_AUDIT and not METADATA_FILES,
+    reason="Run the scraper with --save-fixtures first.",
+    )
+
 def test_saved_live_fixtures_remain_parseable() -> None:
     def is_search_fixture(filename: str) -> bool:
         if filename in {
