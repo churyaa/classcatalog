@@ -1078,6 +1078,186 @@ def _normalise_course(
     )
 
 
+def _detail_physical_class_numbers(detail: CourseDetailOutput) -> tuple[str, ...]:
+    """Return the stable physical class-number set for one deep course offering."""
+
+    return tuple(
+        sorted(
+            {
+                section.class_number.strip()
+                for section in detail.sections
+                if section.class_number.strip()
+            }
+        )
+    )
+
+
+def _offer_number_sort_key(value: str | None) -> tuple[int, object]:
+    """Sort numeric PeopleSoft offer numbers first, then other values deterministically."""
+
+    normalized = (value or "").strip()
+    if normalized.isdigit():
+        return (0, int(normalized))
+    return (1, normalized)
+
+
+def _detail_metadata_score(detail: CourseDetailOutput) -> int:
+    """Prefer the duplicate administrative offering with the richest section metadata."""
+
+    score = 0
+    for section in detail.sections:
+        text_fields = (
+            section.section_number,
+            section.component,
+            section.description,
+            section.prerequisite_text,
+            section.instruction_mode_text,
+            section.campus,
+            section.location,
+            section.instructor,
+            section.bookstore_url,
+            section.materials_description,
+        )
+        score += sum(bool((value or "").strip()) for value in text_fields)
+        score += sum(
+            value is not None
+            for value in (
+                section.units,
+                section.seats_available,
+                section.seat_capacity,
+                section.seats_enrolled,
+                section.waitlist_capacity,
+                section.waitlist_total,
+                section.waitlist_available,
+                section.textbook_required,
+            )
+        )
+        score += len(section.meetings)
+    return score
+
+
+def _merge_duplicate_offer_section_numbers(
+    canonical: CourseDetailOutput,
+    candidates: Sequence[CourseDetailOutput],
+) -> CourseDetailOutput:
+    """Fill canonical missing section numbers when duplicate offers agree on the value."""
+
+    values_by_class: dict[str, set[str]] = defaultdict(set)
+    for candidate in candidates:
+        for section in candidate.sections:
+            value = (section.section_number or "").strip()
+            if value:
+                values_by_class[section.class_number].add(value)
+
+    merged_sections: list[SdsuCourseSectionRecord] = []
+    changed = False
+    for section in canonical.sections:
+        if (section.section_number or "").strip():
+            merged_sections.append(section)
+            continue
+        values = values_by_class.get(section.class_number, set())
+        if len(values) == 1:
+            merged_sections.append(
+                section.model_copy(update={"section_number": next(iter(values))})
+            )
+            changed = True
+        else:
+            merged_sections.append(section)
+
+    if not changed:
+        return canonical
+    return canonical.model_copy(update={"sections": tuple(merged_sections)})
+
+
+def _collapse_duplicate_administrative_offers(
+    outputs: Sequence[SubjectDetailOutput],
+) -> tuple[
+    dict[str, CourseDetailOutput],
+    frozenset[str],
+    tuple[tuple[CourseDetailOutput, tuple[CourseDetailOutput, ...], tuple[str, ...]], ...],
+]:
+    """Collapse duplicate PeopleSoft offers that expose the exact same physical classes.
+
+    SDSU can publish the same course/CRSE_ID through multiple CRSE_OFFER_NBR values.
+    When those offers have the same term, course identity, career, title, and complete
+    physical class-number set, they are administrative duplicates rather than separate
+    ClassCatalog listings. Keep one canonical offer for grouping consistency and suppress
+    the others before production sections are normalized.
+
+    Distinct physical class sets are never collapsed.
+    """
+
+    grouped: dict[
+        tuple[str, str, str, str, str, str, tuple[str, ...]],
+        list[CourseDetailOutput],
+    ] = defaultdict(list)
+
+    for output in outputs:
+        for detail in output.course_details:
+            if (
+                detail.status is not DetailCourseStatus.COMPLETE
+                or detail.course_info is None
+                or not detail.sections
+                or not (detail.course.crse_id or "").strip()
+            ):
+                continue
+
+            physical = _detail_physical_class_numbers(detail)
+            if not physical:
+                continue
+
+            course = detail.course
+            identity = (
+                (course.term_code or output.term_code or "").strip(),
+                course.subject.strip().upper(),
+                " ".join(course.course_code.strip().upper().split()),
+                (course.crse_id or "").strip(),
+                (course.acad_career or "").strip().upper(),
+                _normalise_inventory_text(course.title),
+                physical,
+            )
+            grouped[identity].append(detail)
+
+    replacements: dict[str, CourseDetailOutput] = {}
+    suppressed: set[str] = set()
+    collapses: list[
+        tuple[CourseDetailOutput, tuple[CourseDetailOutput, ...], tuple[str, ...]]
+    ] = []
+
+    for candidates in grouped.values():
+        offers = {
+            (detail.course.crse_offer_nbr or "").strip()
+            for detail in candidates
+        }
+        if len(candidates) < 2 or len(offers) < 2:
+            continue
+
+        ordered = sorted(
+            candidates,
+            key=lambda detail: (
+                -_detail_metadata_score(detail),
+                _offer_number_sort_key(detail.course.crse_offer_nbr),
+                detail.course_key,
+            ),
+        )
+        canonical = _merge_duplicate_offer_section_numbers(
+            ordered[0],
+            tuple(ordered),
+        )
+        duplicates = tuple(ordered[1:])
+        replacements[canonical.course_key] = canonical
+        suppressed.update(detail.course_key for detail in duplicates)
+        collapses.append(
+            (
+                canonical,
+                duplicates,
+                _detail_physical_class_numbers(canonical),
+            )
+        )
+
+    return replacements, frozenset(suppressed), tuple(collapses)
+
+
 def _coverage(
     counters: Mapping[str, _CoverageCounter],
 ) -> tuple[FieldCoverage, ...]:
@@ -1513,6 +1693,38 @@ def build_production_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
         issues=issues,
     )
 
+
+    (
+        duplicate_offer_replacements,
+        suppressed_duplicate_offer_keys,
+        duplicate_offer_collapses,
+    ) = _collapse_duplicate_administrative_offers(outputs)
+    for canonical, duplicates, physical_classes in duplicate_offer_collapses:
+        duplicate_offers = ", ".join(
+            sorted(
+                {
+                    (detail.course.crse_offer_nbr or "").strip() or "unknown"
+                    for detail in duplicates
+                },
+                key=lambda value: _offer_number_sort_key(value),
+            )
+        )
+        canonical_offer = (canonical.course.crse_offer_nbr or "").strip() or "unknown"
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.INFO,
+                code="duplicate_administrative_offering_collapsed",
+                message=(
+                    "Collapsed duplicate PeopleSoft administrative offering(s) "
+                    f"{duplicate_offers} into canonical offer {canonical_offer}; "
+                    "all offers exposed the same physical class numbers: "
+                    f"{', '.join(physical_classes)}."
+                ),
+                subject=canonical.course.subject,
+                course_key=canonical.course_key,
+            )
+        )
+
     course_records: list[ProductionCourseRecord] = []
     section_records: list[CourseSection] = []
     section_by_id: dict[str, CourseSection] = {}
@@ -1576,7 +1788,9 @@ def build_production_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
 
         detail_by_key = {detail.course_key: detail for detail in output.course_details}
         for key in output.detail_target_course_keys:
-            detail = detail_by_key.get(key)
+            if key in suppressed_duplicate_offer_keys:
+                continue
+            detail = duplicate_offer_replacements.get(key, detail_by_key.get(key))
             if detail is None:
                 issues.append(
                     ValidationIssue(

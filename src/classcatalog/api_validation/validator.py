@@ -728,9 +728,19 @@ def validate_api_sections(
                 "Day filtering differs from direct repository filtering."
             )
             assert all(
-                any(day.value in meeting["days"] for meeting in item["meetings"])
+                any(
+                    day.value in meeting.get("days", ())
+                    for component in (
+                        item,
+                        *item.get("linked_components", ()),
+                    )
+                    for meeting in component.get("meetings", ())
+                )
                 for item in payload["items"]
-            ), "The day filter returned a section without the selected day."
+            ), (
+                "The day filter returned an enrollment option without the selected "
+                "day in its primary or linked components."
+            )
 
             timed_candidate = next(
                 (

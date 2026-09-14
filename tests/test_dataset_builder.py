@@ -594,3 +594,168 @@ def test_recovery_runs_for_single_secondary_component_detail(tmp_path: Path) -> 
     assert recovered.group_indices["9999"] == (1,)
     assert recovered.primary_group_indices.get("9999", ()) == ()
     assert recovered.primary_group_indices["3212"] == (1,)
+def test_build_collapses_duplicate_administrative_offers_with_same_physical_classes(
+    tmp_path: Path,
+) -> None:
+    subject_dir = tmp_path / "subjects"
+    subject_path = subject_dir / "cs.json"
+    output_dir = tmp_path / "production"
+
+    output = _subject_output()
+    first = output.course_details[0]
+    assert first.course_info is not None
+
+    first_option = first.course_info.options[0].model_copy(
+        update={"section_number": None}
+    )
+    first_info = first.course_info.model_copy(
+        update={"selected_section_number": None, "options": (first_option,)}
+    )
+    first_section = first.sections[0].model_copy(update={"section_number": None})
+    first = first.model_copy(
+        update={"course_info": first_info, "sections": (first_section,)}
+    )
+
+    second_hit = first.course.model_copy(
+        update={
+            "crse_offer_nbr": "3",
+            "detail_url": (
+                "https://example.invalid/detail?"
+                "CRSE_ID=038518&CRSE_OFFER_NBR=3&ACAD_CAREER=UGRD&CLASS_NBR=3213"
+            ),
+        }
+    )
+    second_option = first_option.model_copy(update={"section_number": "01"})
+    second_info = first_info.model_copy(
+        update={"selected_section_number": "01", "options": (second_option,)}
+    )
+    second_section = first_section.model_copy(update={"section_number": "01"})
+    second = first.model_copy(
+        update={
+            "course_key": "CS|038518|3|UGRD",
+            "course": second_hit,
+            "course_info": second_info,
+            "sections": (second_section,),
+        }
+    )
+
+    result = output.search_result.model_copy(
+        update={
+            "initial_result_count": 2,
+            "filtered_result_count": 2,
+            "courses": (first.course, second.course),
+        }
+    )
+    duplicate_output = output.model_copy(
+        update={
+            "search_result": result,
+            "detail_target_course_keys": (first.course_key, second.course_key),
+            "course_details": (first, second),
+            "detail_courses_targeted": 2,
+            "detail_courses_attempted": 2,
+            "detail_courses_complete": 2,
+            "detail_courses_partial": 0,
+        }
+    )
+    write_model(subject_path, duplicate_output)
+
+    build = build_production_dataset(
+        DatasetBuildConfig(subject_output_dir=subject_dir, output_dir=output_dir)
+    )
+
+    assert build.exit_code == 0
+    assert build.report.status == "passed"
+    assert build.report.counts.discovered_courses == 2
+    assert build.report.counts.complete_course_details == 1
+    assert build.report.counts.course_section_listings == 1
+    assert build.report.counts.unique_physical_sections == 1
+    assert any(
+        issue.code == "duplicate_administrative_offering_collapsed"
+        for issue in build.report.issues
+    )
+
+    sections = json.loads((output_dir / "sections.json").read_text(encoding="utf-8"))
+    assert len(sections) == 1
+    assert sections[0]["crse_offer_nbr"] == "3"
+    assert sections[0]["source_course_key"] == "CS|038518|3|UGRD"
+    assert sections[0]["schedule_number"] == "3213"
+    assert sections[0]["section_number"] == "01"
+
+
+def test_build_keeps_same_course_offers_when_physical_class_sets_differ(
+    tmp_path: Path,
+) -> None:
+    subject_dir = tmp_path / "subjects"
+    subject_path = subject_dir / "cs.json"
+    output_dir = tmp_path / "production"
+
+    output = _subject_output()
+    first = output.course_details[0]
+    assert first.course_info is not None
+
+    second_hit = first.course.model_copy(
+        update={
+            "crse_offer_nbr": "3",
+            "class_number": "9999",
+            "detail_url": (
+                "https://example.invalid/detail?"
+                "CRSE_ID=038518&CRSE_OFFER_NBR=3&ACAD_CAREER=UGRD&CLASS_NBR=9999"
+            ),
+        }
+    )
+    second_option = first.course_info.options[0].model_copy(
+        update={"class_number": "9999", "section_number": "02"}
+    )
+    second_info = first.course_info.model_copy(
+        update={
+            "selected_class_number": "9999",
+            "selected_section_number": "02",
+            "options": (second_option,),
+        }
+    )
+    second_section = first.sections[0].model_copy(
+        update={"class_number": "9999", "section_number": "02"}
+    )
+    second = first.model_copy(
+        update={
+            "course_key": "CS|038518|3|UGRD",
+            "course": second_hit,
+            "course_info": second_info,
+            "sections": (second_section,),
+        }
+    )
+
+    result = output.search_result.model_copy(
+        update={
+            "initial_result_count": 2,
+            "filtered_result_count": 2,
+            "courses": (first.course, second.course),
+        }
+    )
+    distinct_output = output.model_copy(
+        update={
+            "search_result": result,
+            "detail_target_course_keys": (first.course_key, second.course_key),
+            "course_details": (first, second),
+            "detail_courses_targeted": 2,
+            "detail_courses_attempted": 2,
+            "detail_courses_complete": 2,
+            "detail_courses_partial": 0,
+        }
+    )
+    write_model(subject_path, distinct_output)
+
+    build = build_production_dataset(
+        DatasetBuildConfig(subject_output_dir=subject_dir, output_dir=output_dir)
+    )
+
+    assert build.exit_code == 0
+    assert build.report.counts.complete_course_details == 2
+    assert build.report.counts.course_section_listings == 2
+    assert build.report.counts.unique_physical_sections == 2
+    assert not any(
+        issue.code == "duplicate_administrative_offering_collapsed"
+        for issue in build.report.issues
+    )
+    sections = json.loads((output_dir / "sections.json").read_text(encoding="utf-8"))
+    assert {row["schedule_number"] for row in sections} == {"3213", "9999"}
