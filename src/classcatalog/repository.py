@@ -22,6 +22,7 @@ from classcatalog.models import (
     SearchResponse,
     SeatStatus,
     SectionCoverageAudit,
+    SortBy,
 )
 from classcatalog.ratings import (
     apply_cached_ratings,
@@ -83,6 +84,10 @@ class CourseRepository:
         )
         self._subject_total = len({section.subject for section in self._sections})
         self._options = self._build_options()
+        self._sections_by_id = {section.id: section for section in self._sections}
+        self._group_cache: tuple[CourseSection, ...] | None = None
+        self._group_indices_by_section_id: dict[str, tuple[int, ...]] | None = None
+        self._sort_index_cache: dict[SortBy, tuple[int, ...]] = {}
 
     @classmethod
     def from_json(
@@ -180,6 +185,8 @@ class CourseRepository:
                     changed += 1
                 replaced.append(candidate)
             self._sections = tuple(replaced)
+            self._sections_by_id = {section.id: section for section in self._sections}
+            self._invalidate_professor_sort_cache()
             self._ratings_record_count = record_count
             self._ratings_load_error = None
         return changed
@@ -221,6 +228,8 @@ class CourseRepository:
                     changed_physical.add(key)
                 replaced.append(candidate)
             self._sections = tuple(replaced)
+            self._sections_by_id = {section.id: section for section in self._sections}
+            self._invalidate_professor_sort_cache()
         return len(changed_physical)
 
 
@@ -262,6 +271,7 @@ class CourseRepository:
                     changed_physical.add(key)
                 replaced.append(candidate)
             self._sections = tuple(replaced)
+            self._sections_by_id = {section.id: section for section in self._sections}
             if changed_physical:
                 self._options = self._build_options()
         return len(changed_physical)
@@ -563,6 +573,118 @@ class CourseRepository:
         return grouped
 
 
+    def _ensure_group_cache(
+        self,
+    ) -> tuple[tuple[CourseSection, ...], dict[str, tuple[int, ...]]]:
+        """Build immutable enrollment-option topology from the authoritative grouper once."""
+        with self._lock:
+            if self._group_cache is None or self._group_indices_by_section_id is None:
+                grouped = tuple(self._grouped_sections())
+                memberships: dict[str, list[int]] = {}
+                for group_index, option in enumerate(grouped):
+                    listing_ids = (option.id, *(component.id for component in option.linked_components))
+                    for listing_id in dict.fromkeys(listing_ids):
+                        memberships.setdefault(listing_id, []).append(group_index)
+                self._group_cache = grouped
+                self._group_indices_by_section_id = {
+                    listing_id: tuple(indices)
+                    for listing_id, indices in memberships.items()
+                }
+                self._sort_index_cache.clear()
+            return self._group_cache, self._group_indices_by_section_id
+
+    def _invalidate_professor_sort_cache(self) -> None:
+        for sort_by in (
+            SortBy.PROFESSOR_RATING_LOW_TO_HIGH,
+            SortBy.PROFESSOR_RATING_HIGH_TO_LOW,
+            SortBy.PROFESSOR_DIFFICULTY_LOW_TO_HIGH,
+            SortBy.PROFESSOR_DIFFICULTY_HIGH_TO_LOW,
+            SortBy.REVIEWS_LOW_TO_HIGH,
+            SortBy.REVIEWS_HIGH_TO_LOW,
+            SortBy.TAKE_AGAIN_LOW_TO_HIGH,
+            SortBy.TAKE_AGAIN_HIGH_TO_LOW,
+        ):
+            self._sort_index_cache.pop(sort_by, None)
+
+    @staticmethod
+    def _professor_sort(sort_by: SortBy) -> bool:
+        return sort_by in {
+            SortBy.PROFESSOR_RATING_LOW_TO_HIGH,
+            SortBy.PROFESSOR_RATING_HIGH_TO_LOW,
+            SortBy.PROFESSOR_DIFFICULTY_LOW_TO_HIGH,
+            SortBy.PROFESSOR_DIFFICULTY_HIGH_TO_LOW,
+            SortBy.REVIEWS_LOW_TO_HIGH,
+            SortBy.REVIEWS_HIGH_TO_LOW,
+            SortBy.TAKE_AGAIN_LOW_TO_HIGH,
+            SortBy.TAKE_AGAIN_HIGH_TO_LOW,
+        }
+
+    def _sorted_group_indices(self, sort_by: SortBy) -> tuple[int, ...]:
+        group_cache, _ = self._ensure_group_cache()
+        with self._lock:
+            cached = self._sort_index_cache.get(sort_by)
+            if cached is not None:
+                return cached
+
+            if self._professor_sort(sort_by):
+                projections = [
+                    self._sections_by_id.get(template.id, template).model_copy(
+                        update={"option_number": template.option_number}
+                    )
+                    for template in group_cache
+                ]
+                index_by_identity = {
+                    id(item): index for index, item in enumerate(projections)
+                }
+                ordered = sort_sections(projections, sort_by)
+            else:
+                index_by_identity = {
+                    id(item): index for index, item in enumerate(group_cache)
+                }
+                ordered = sort_sections(group_cache, sort_by)
+
+            indices = tuple(index_by_identity[id(item)] for item in ordered)
+            self._sort_index_cache[sort_by] = indices
+            return indices
+
+    def _selected_group_indices(
+        self,
+        matched_sections: Sequence[CourseSection],
+    ) -> set[int]:
+        _, memberships = self._ensure_group_cache()
+        return {
+            group_index
+            for section in matched_sections
+            for group_index in memberships.get(section.id, ())
+        }
+
+    def _materialize_group_indices(
+        self,
+        group_indices: Sequence[int],
+    ) -> tuple[CourseSection, ...]:
+        group_cache, _ = self._ensure_group_cache()
+        with self._lock:
+            sections_by_id = self._sections_by_id
+
+        materialized: list[CourseSection] = []
+        for group_index in group_indices:
+            template = group_cache[group_index]
+            primary = sections_by_id.get(template.id, template)
+            linked: list[CourseComponent] = []
+            for component in template.linked_components:
+                source = sections_by_id.get(component.id)
+                linked.append(self._linked_component(source) if source is not None else component)
+            materialized.append(
+                primary.model_copy(
+                    update={
+                        "campus": normalize_campus(primary.campus),
+                        "option_number": template.option_number,
+                        "linked_components": tuple(linked),
+                    }
+                )
+            )
+        return tuple(materialized)
+
     def displayed_options(
         self,
         *,
@@ -570,12 +692,7 @@ class CourseRepository:
         subject: str | None = None,
         course_code: str | None = None,
     ) -> tuple[CourseSection, ...]:
-        """Return exact, read-only enrollment options using the authoritative grouping model.
-
-        This is intentionally a projection of ``_grouped_sections`` rather than a second
-        grouping implementation. SEO pages and other read-only surfaces can therefore
-        consume the same linked-component and orphan-suppression behavior as class search.
-        """
+        """Return exact, read-only enrollment options using cached authoritative topology."""
         normalized_term = term.strip() if term is not None else None
         normalized_subject = (
             " ".join(subject.strip().upper().split()) if subject is not None else None
@@ -585,9 +702,11 @@ class CourseRepository:
             if course_code is not None
             else None
         )
+        with self._lock:
+            sections = self._sections
         matched = [
             section
-            for section in self._sections
+            for section in sections
             if (normalized_term is None or section.term == normalized_term)
             and (
                 normalized_subject is None
@@ -599,8 +718,13 @@ class CourseRepository:
                 == normalized_course_code
             )
         ]
-        grouped = self._grouped_sections(matched)
-        return tuple(sort_sections(grouped, SearchFilters().sort_by))
+        selected = self._selected_group_indices(matched)
+        ordered_indices = tuple(
+            index
+            for index in self._sorted_group_indices(SearchFilters().sort_by)
+            if index in selected
+        )
+        return self._materialize_group_indices(ordered_indices)
 
     @staticmethod
     def _physical_key(section: CourseSection) -> tuple[str, str]:
@@ -670,24 +794,31 @@ class CourseRepository:
         )
 
     def search(self, filters: SearchFilters) -> SearchResponse:
-        matched = [section for section in self._sections if matches(section, filters)]
-        grouped = self._grouped_sections(matched)
-        ordered = sort_sections(grouped, filters.sort_by)
-        unfiltered_total = len(self._grouped_sections())
+        with self._lock:
+            sections = self._sections
+        matched = [section for section in sections if matches(section, filters)]
+        selected = self._selected_group_indices(matched)
+        ordered_indices = tuple(
+            index
+            for index in self._sorted_group_indices(filters.sort_by)
+            if index in selected
+        )
+        group_cache, _ = self._ensure_group_cache()
 
         page_size = min(max(filters.page_size, 1), 50)
-        total_pages = max(1, math.ceil(len(ordered) / page_size))
+        total_pages = max(1, math.ceil(len(ordered_indices) / page_size))
         page = min(max(filters.page, 1), total_pages)
         start = (page - 1) * page_size
         end = start + page_size
+        page_indices = ordered_indices[start:end]
 
         return SearchResponse(
-            filtered_total=len(ordered),
-            unfiltered_total=unfiltered_total,
+            filtered_total=len(ordered_indices),
+            unfiltered_total=len(group_cache),
             page=page,
             page_size=page_size,
             total_pages=total_pages,
-            items=tuple(ordered[start:end]),
+            items=self._materialize_group_indices(page_indices),
         )
 
 
