@@ -955,15 +955,48 @@ function populateSelect(select, values, emptyLabel) {
   });
 }
 
+function academicTermKey(term) {
+  const match = /^(Winter|Spring|Summer|Fall)\s+(\d{4})$/.exec(String(term || "").trim());
+  if (!match) return Number.NEGATIVE_INFINITY;
+  const seasonOrder = { Winter: 0, Spring: 1, Summer: 2, Fall: 3 };
+  return Number(match[2]) * 10 + seasonOrder[match[1]];
+}
+
+function currentAcademicTerm(terms, now = new Date()) {
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const season = month <= 5 ? "Spring" : month <= 7 ? "Summer" : "Fall";
+  const currentTerm = `${season} ${year}`;
+
+  if (terms.includes(currentTerm)) return currentTerm;
+
+  // If the exact current term is not installed, prefer the newest installed term
+  // that is not later than the current academic term. If every installed term is
+  // in the future, use the earliest installed term instead.
+  const currentKey = academicTermKey(currentTerm);
+  const previousOrCurrent = terms
+    .filter((term) => academicTermKey(term) <= currentKey)
+    .sort((left, right) => academicTermKey(left) - academicTermKey(right));
+
+  if (previousOrCurrent.length) {
+    return previousOrCurrent[previousOrCurrent.length - 1];
+  }
+  return terms[0] || "";
+}
+
 function populateOptions(options) {
   state.options = options;
+  const terms = Array.isArray(options.terms) ? options.terms : [];
+  if (!terms.includes(state.selectedTerm)) {
+    state.selectedTerm = currentAcademicTerm(terms);
+  }
+
   const termContainer = document.querySelector("#term-buttons");
   termContainer.replaceChildren();
-  const allTerms = ["", ...options.terms];
-  allTerms.forEach((term) => {
+  terms.forEach((term) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = term || "All terms";
+    button.textContent = term;
     button.dataset.term = term;
     button.setAttribute("aria-pressed", String(term === state.selectedTerm));
     button.addEventListener("click", () => {
