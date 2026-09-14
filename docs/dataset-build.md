@@ -65,13 +65,37 @@ results/fall-2026-production/
 └── manifest.json
 ```
 
-With `--install-api-data`, `sections.json` is also copied atomically to:
+With `--install-api-data`, the newly built term is installed atomically into:
 
 ```text
 src/classcatalog/data/sections.json
 ```
 
 Restart the FastAPI run configuration after installation. `/api/health` should then report the normalized course-section listing count instead of the 13-row sample count.
+
+## Multi-term active data
+
+The production builder still validates one scrape term at a time, but `--install-api-data` is term-aware. Installing Spring 2027 removes any older Spring 2027 records from the active file, inserts the new Spring 2027 build, and preserves Fall 2026 or any other installed terms. Re-running a Spring 2027 scrape therefore replaces that term instead of appending a second copy. Duplicate section IDs and duplicate logical `(term, course_code, class_number)` listings are rejected before the active file is replaced.
+
+Inspect installed terms with:
+
+```powershell
+.\.venv\Scripts\python.exe -m classcatalog.dataset.terms list
+```
+
+When an old term should leave the active catalog, preview the retirement first:
+
+```powershell
+.\.venv\Scripts\python.exe -m classcatalog.dataset.terms retire --term "Fall 2026"
+```
+
+The preview does not modify `sections.json`. Apply it only after checking the counts:
+
+```powershell
+.\.venv\Scripts\python.exe -m classcatalog.dataset.terms retire --term "Fall 2026" --apply
+```
+
+The term manager refuses to remove the final active term by default. Browser favorites are not part of this process; they remain in each user's local storage until the user removes them.
 
 ## What is validated
 
