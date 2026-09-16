@@ -102,7 +102,12 @@ def is_course_info_url(value: str | None) -> bool:
         return False
     parsed = urlparse(value)
     host = (parsed.hostname or "").casefold()
-    return host.endswith("sdsu.edu") and "SSR_CRSE_INFO_FL.GBL" in parsed.path.upper()
+    is_sdsu_host = host == "sdsu.edu" or host.endswith(".sdsu.edu")
+    return (
+        parsed.scheme.casefold() == "https"
+        and is_sdsu_host
+        and "SSR_CRSE_INFO_FL.GBL" in parsed.path.upper()
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -64,6 +64,7 @@ from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
 STATIC_DIR = Path(__file__).parent / "static"
 LOGGER = logging.getLogger(__name__)
 
+ENVIRONMENT_ENV = "CLASSCATALOG_ENV"
 ADMIN_PASSWORD_ENV = "CLASSCATALOG_ADMIN_PASSWORD"
 ADMIN_SESSION_COOKIE = "classcatalog_admin_session"
 ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8
@@ -71,6 +72,11 @@ ADMIN_LOGIN_WINDOW_SECONDS = 60 * 15
 ADMIN_LOGIN_MAX_FAILURES = 5
 BASE_DIR = Path(__file__).resolve().parent
 ERROR_PAGES_DIR = BASE_DIR / "error_pages"
+
+def _api_docs_enabled() -> bool:
+    environment = os.getenv(ENVIRONMENT_ENV, "production").strip().casefold()
+    return environment in {"development", "dev", "local", "test"}
+
 
 class AdminLoginRequest(BaseModel):
     password: str
@@ -369,11 +375,15 @@ def create_app(
             if active_seat_service is not None:
                 active_seat_service.stop()
 
+    api_docs_enabled = _api_docs_enabled()
     app = FastAPI(
         title="ClassCatalog API",
         version="0.1.0",
         description="Faceted SDSU class-search and public-catalog planning aid",
         lifespan=lifespan,
+        docs_url="/docs" if api_docs_enabled else None,
+        redoc_url="/redoc" if api_docs_enabled else None,
+        openapi_url="/openapi.json" if api_docs_enabled else None,
     )
 
     def _service_error_response(
