@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import re
 from pathlib import Path
 
 from classcatalog.dataset.builder import DatasetBuildConfig, build_production_dataset
@@ -46,8 +48,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("results/fall-2026-production"),
-        help="Destination for sections.json, courses.json, manifest, diff, and reports.",
+        help=(
+            "Destination for sections.json, courses.json, manifest, diff, and reports. "
+            "Defaults to results/<term>-production, inferred from the scrape inputs."
+        ),
     )
     parser.add_argument(
         "--install-api-data",
@@ -82,16 +86,59 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+
+
+def _term_from_json(path: Path) -> str | None:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read term metadata from {path}: {exc}") from exc
+    if isinstance(raw, dict):
+        term = str(raw.get("term") or "").strip()
+        return term or None
+    return None
+
+
+def _infer_build_term(args: argparse.Namespace) -> str:
+    for path in (args.checkpoint, args.deep_run, args.discovery_run):
+        if path is None:
+            continue
+        term = _term_from_json(path)
+        if term:
+            return term
+
+    if args.subject_output_dir is not None:
+        for path in sorted(args.subject_output_dir.glob("*.json")):
+            term = _term_from_json(path)
+            if term:
+                return term
+
+    raise ValueError(
+        "Could not infer the scrape term for the default output directory. "
+        "Provide --checkpoint/--deep-run/--subject-output-dir or set --output-dir explicitly."
+    )
+
+
+def _resolve_output_dir(args: argparse.Namespace) -> Path:
+    if args.output_dir is not None:
+        return args.output_dir
+    term = _infer_build_term(args)
+    return Path("results") / f"{_slug(term)}-production"
+
+
 def main() -> int:
     args = _parser().parse_args()
     try:
+        output_dir = _resolve_output_dir(args)
         result = build_production_dataset(
             DatasetBuildConfig(
                 checkpoint_path=args.checkpoint,
                 subject_output_dir=args.subject_output_dir,
                 deep_run_path=args.deep_run,
                 discovery_run_path=args.discovery_run,
-                output_dir=args.output_dir,
+                output_dir=output_dir,
                 api_data_path=args.api_data_path if args.install_api_data else None,
                 strict=not args.allow_validation_errors,
             )
@@ -187,7 +234,7 @@ def main() -> int:
         f"offering_number_changes={len(report.inventory_diff.offering_number_changes)} "
         f"metadata_changes={len(report.inventory_diff.changed_courses)} "
         f"errors={report.errors} warnings={report.warnings} "
-        f"output_dir={args.output_dir} "
+        f"output_dir={output_dir} "
         f"api_data={report.api_data_installed_to}"
     )
     return result.exit_code

@@ -69,7 +69,10 @@ SUBJECT_CAP_PARTITION_FACETS: Final[tuple[str, ...]] = (
 
 # Only values observed directly should live here. Other terms are discovered from the landing page
 # or supplied explicitly with --term-code.
-CONFIRMED_TERM_CODES: Final[dict[str, str]] = {"Fall 2026": "2267"}
+CONFIRMED_TERM_CODES: Final[dict[str, str]] = {
+    "Fall 2026": "2267",
+    "Spring 2027": "2273",
+}
 
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 30.0
 DEFAULT_DELAY_SECONDS: Final[float] = 2.0

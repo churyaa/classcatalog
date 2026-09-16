@@ -135,9 +135,23 @@ def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
 
 
-def _parse_subjects(values: list[str], *, all_subjects: bool) -> tuple[str, ...]:
+def _parse_subjects(
+    values: list[str],
+    *,
+    all_subjects: bool,
+    discovered_subjects: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    live_subjects = tuple(
+        dict.fromkeys(
+            " ".join(normalize_subject_input(subject).split())
+            for subject in discovered_subjects
+            if str(subject).strip()
+        )
+    )
+    known = set(SUBJECT_ABBREVIATIONS) | set(live_subjects)
     if all_subjects:
-        selected = list(SUBJECT_ABBREVIATIONS)
+        selected = [*SUBJECT_ABBREVIATIONS]
+        selected.extend(sorted(subject for subject in live_subjects if subject not in selected))
     elif values:
         selected = []
         for value in values:
@@ -149,7 +163,7 @@ def _parse_subjects(values: list[str], *, all_subjects: bool) -> tuple[str, ...]
     else:
         selected = ["CS"]
 
-    unknown = [subject for subject in selected if subject not in SUBJECT_ABBREVIATIONS]
+    unknown = [subject for subject in selected if subject not in known]
     if unknown:
         raise ValueError(f"Unknown SDSU subject abbreviation(s): {', '.join(unknown)}")
     return tuple(dict.fromkeys(selected))
@@ -254,6 +268,36 @@ def _default_subject_output_dir(term: str) -> Path:
     return DEFAULT_RESULTS_DIRECTORY / _slug(term) / "subjects"
 
 
+def _default_subject_inventory_output(term: str) -> Path:
+    return DEFAULT_RESULTS_DIRECTORY / _slug(term) / "subject-inventory.json"
+
+
+def _subject_inventory_document(
+    *,
+    term: str,
+    term_code: str,
+    discovered_subjects: tuple[str, ...],
+) -> dict[str, object]:
+    discovered = tuple(sorted(dict.fromkeys(discovered_subjects)))
+    seed = tuple(SUBJECT_ABBREVIATIONS)
+    effective = (*seed, *(subject for subject in discovered if subject not in seed))
+    return {
+        "term": term,
+        "term_code": term_code,
+        "seed_subjects": list(seed),
+        "discovered_subjects": list(discovered),
+        "effective_subjects": list(effective),
+        "new_subjects": sorted(set(discovered) - set(seed)),
+        # A seed subject can legitimately have no classes in one term. Do not call it
+        # removed merely because it was not observed in this term's live facet probes.
+        "seed_subjects_not_observed": sorted(set(seed) - set(discovered)),
+    }
+
+
+def _write_subject_inventory(path: Path, payload: dict[str, object]) -> None:
+    _atomic_write(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
 def _subject_output_path(root: Path, subject: str) -> Path:
     return root / f"{_slug(subject)}.json"
 
@@ -313,7 +357,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "Scrape SDSU public Fluid class-search result stubs with an exact subject-facet POST."
         )
     )
-    parser.add_argument("--term", default="Fall 2026")
+    parser.add_argument(
+        "--term",
+        help=(
+            "Exact SDSU term label, for example 'Fall 2027'. Required for a scrape; "
+            "there is intentionally no stale semester default."
+        ),
+    )
     parser.add_argument(
         "--term-code",
         help=(
@@ -331,7 +381,26 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--all-subjects",
         action="store_true",
-        help="Process the full 127-subject seed. Without this option, the safe default is CS only.",
+        help=(
+            "Process the static subject seed plus live-discovered SDSU subject codes. "
+            "Without this option, the safe default is CS only."
+        ),
+    )
+    parser.add_argument(
+        "--known-subjects-only",
+        action="store_true",
+        help=(
+            "With --all-subjects, explicitly skip live Subject-facet discovery and use "
+            "only the checked-in seed. Intended as an upstream-recovery escape hatch."
+        ),
+    )
+    parser.add_argument(
+        "--subject-inventory-output",
+        type=Path,
+        help=(
+            "Where to save the live subject inventory manifest. Defaults to "
+            "results/<term>/subject-inventory.json when discovery runs."
+        ),
     )
     parser.add_argument(
         "--resume-from",
@@ -443,6 +512,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--list-terms",
         action="store_true",
         help="Bootstrap the landing page, print discovered term labels/codes, and exit.",
+    )
+    parser.add_argument(
+        "--list-subjects",
+        action="store_true",
+        help=(
+            "Resolve --term, discover live Subject facet codes across all class statuses, "
+            "write the subject inventory manifest, print it, and exit."
+        ),
     )
     return parser
 
@@ -1535,7 +1612,35 @@ def run(args: argparse.Namespace) -> int:
             print(json.dumps(discovered, indent=2, sort_keys=True))
             return 0
 
-        term = str(args.term)
+        if args.term is None or not str(args.term).strip():
+            logger.error(
+                "invalid_arguments",
+                error="--term is required for scraping or --list-subjects.",
+            )
+            return 2
+        term = str(args.term).strip()
+        try:
+            term_code = client.resolve_term_code(term, args.term_code)
+        except Exception as exc:  # noqa: BLE001 - CLI boundary
+            logger.error("term_resolution_failed", term=term, error=str(exc))
+            return 1
+
+        if args.list_subjects:
+            try:
+                discovered_subjects = client.discover_subjects(term_code=term_code)
+            except Exception as exc:  # noqa: BLE001 - concise CLI diagnostic
+                logger.error("subject_inventory_discovery_failed", term=term, error=str(exc))
+                return 1
+            document = _subject_inventory_document(
+                term=term,
+                term_code=term_code,
+                discovered_subjects=discovered_subjects,
+            )
+            inventory_path = args.subject_inventory_output or _default_subject_inventory_output(term)
+            _write_subject_inventory(inventory_path, document)
+            print(json.dumps(document, indent=2, sort_keys=True))
+            return 0
+
         checkpoint_path = args.checkpoint or _default_checkpoint(term)
         resume_checkpoint: ScrapeCheckpoint | None = None
 
@@ -1573,13 +1678,37 @@ def run(args: argparse.Namespace) -> int:
                 error=str(exc),
             )
             return 2
+        discovered_subjects: tuple[str, ...] = ()
+        if resume_checkpoint is None and args.all_subjects and not args.known_subjects_only:
+            try:
+                discovered_subjects = client.discover_subjects(term_code=term_code)
+            except Exception as exc:  # noqa: BLE001 - preflight must fail closed
+                logger.error("subject_inventory_discovery_failed", term=term, error=str(exc))
+                return 1
+            document = _subject_inventory_document(
+                term=term,
+                term_code=term_code,
+                discovered_subjects=discovered_subjects,
+            )
+            inventory_path = args.subject_inventory_output or _default_subject_inventory_output(term)
+            _write_subject_inventory(inventory_path, document)
+            logger.info(
+                "subject_inventory_discovered",
+                term=term,
+                discovered=len(discovered_subjects),
+                effective=len(document["effective_subjects"]),
+                new_subjects=document["new_subjects"],
+                manifest=str(inventory_path),
+            )
+
         try:
-            if resume_checkpoint is not None and not args.subjects and not args.all_subjects:
+            if resume_checkpoint is not None and not args.subjects:
                 requested_subjects = resume_checkpoint.requested_subjects
             else:
                 requested_subjects = _parse_subjects(
                     list(args.subjects),
                     all_subjects=bool(args.all_subjects),
+                    discovered_subjects=discovered_subjects,
                 )
                 if resume_checkpoint is None:
                     requested_subjects = _resume_slice(
@@ -1613,12 +1742,6 @@ def run(args: argparse.Namespace) -> int:
         except ValueError as exc:
             logger.error("invalid_arguments", error=str(exc))
             return 2
-
-        try:
-            term_code = client.resolve_term_code(term, args.term_code)
-        except Exception as exc:  # noqa: BLE001 - CLI boundary
-            logger.error("term_resolution_failed", term=term, error=str(exc))
-            return 1
 
         subject_output_dir.mkdir(parents=True, exist_ok=True)
         if resume_checkpoint is None:

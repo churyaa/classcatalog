@@ -111,17 +111,30 @@ def parse_subject_catalog(
     raise CourseCodeParseError(f"Could not split subject and catalog number from {raw_value!r}.")
 
 
-def _candidate_term_code(value: str, term_label: str) -> str | None:
+def _candidate_term_codes(value: str, term_label: str) -> tuple[str, ...]:
     normalized = normalize_space(value)
     if not normalized or normalized == term_label:
-        return None
-    for candidate in _TERM_CODE_RE.findall(normalized):
-        if candidate != term_label.rsplit(" ", maxsplit=1)[-1]:
-            return candidate
-    return None
+        return ()
+    year = term_label.rsplit(" ", maxsplit=1)[-1]
+    return tuple(
+        dict.fromkeys(
+            candidate
+            for candidate in _TERM_CODE_RE.findall(normalized)
+            if candidate != year
+        )
+    )
 
 
 def parse_term_codes(html: str) -> dict[str, str]:
+    """Discover term labels only when their PeopleSoft STRM association is unambiguous.
+
+    The Fluid landing page can render neighboring semester labels/codes close together.
+    A broad regex that simply takes the first nearby four-digit value can therefore bind
+    one semester to another semester's STRM. Prefer each element's own attributes/markup
+    and use the wider HTML fallback only when exactly one term label and one candidate
+    STRM occur in that local segment. Ambiguous markup is deliberately left unresolved.
+    """
+
     soup = BeautifulSoup(html, "html.parser")
     mapping: dict[str, str] = {}
 
@@ -132,22 +145,21 @@ def parse_term_codes(html: str) -> dict[str, str]:
         if label_match is None:
             continue
         label = " ".join(word.capitalize() for word in label_match.group(0).split())
-        candidates: list[str] = []
+        values: list[str] = []
         for attribute in ("value", "data-value", "data-strm", "data-term", "onclick", "href"):
             value = element.get(attribute)
             if isinstance(value, str):
-                candidates.append(value)
-        candidates.append(str(element))
-        code = next(
-            (
-                found
-                for value in candidates
-                if (found := _candidate_term_code(value, label)) is not None
-            ),
-            None,
+                values.append(value)
+        values.append(str(element))
+        codes = tuple(
+            dict.fromkeys(
+                code
+                for value in values
+                for code in _candidate_term_codes(value, label)
+            )
         )
-        if code is not None:
-            mapping[label] = code
+        if len(codes) == 1:
+            mapping[label] = codes[0]
 
     source = str(soup)
     for label_match in _TERM_RE.finditer(source):
@@ -157,9 +169,15 @@ def parse_term_codes(html: str) -> dict[str, str]:
         start = max(0, label_match.start() - 350)
         end = min(len(source), label_match.end() + 350)
         segment = source[start:end]
-        code = _candidate_term_code(segment, label)
-        if code is not None:
-            mapping[label] = code
+        nearby_labels = {
+            " ".join(word.capitalize() for word in match.group(0).split())
+            for match in _TERM_RE.finditer(segment)
+        }
+        if nearby_labels != {label}:
+            continue
+        codes = _candidate_term_codes(segment, label)
+        if len(codes) == 1:
+            mapping[label] = codes[0]
     return mapping
 
 
@@ -271,7 +289,11 @@ def _is_hidden(element: Tag) -> bool:
     return aria_hidden == "true" or "display:none" in style
 
 
-def _course_code_from_row(row: Tag) -> tuple[str, str, str]:
+def _course_code_from_row(
+    row: Tag,
+    *,
+    known_subjects: Sequence[str] = SUBJECT_ABBREVIATIONS,
+) -> tuple[str, str, str]:
     candidates: list[str] = []
     for element in row.find_all(["p", "span", "div"]):
         if not isinstance(element, Tag):
@@ -282,7 +304,7 @@ def _course_code_from_row(row: Tag) -> tuple[str, str, str]:
 
     for candidate in candidates:
         try:
-            subject, catalog_number = parse_subject_catalog(candidate)
+            subject, catalog_number = parse_subject_catalog(candidate, known_subjects)
         except CourseCodeParseError:
             continue
         return subject, catalog_number, f"{subject} {catalog_number}"
@@ -424,9 +446,18 @@ def parse_result_rows(
     rows = _result_rows(normalized_html)
     hits: list[CourseSearchHit] = []
     seen: set[tuple[str, str | None, str | None]] = set()
+    known_subjects: Sequence[str] = SUBJECT_ABBREVIATIONS
+    if expected_subject is not None and expected_subject not in SUBJECT_ABBREVIATIONS:
+        # A live-discovered subject is authoritative for this exact-subject parse. Keep
+        # the global parser strict while allowing newly introduced SDSU codes to be
+        # scraped before ClassCatalog's static seed is updated.
+        known_subjects = (*SUBJECT_ABBREVIATIONS, expected_subject)
 
     for index, row in enumerate(rows):
-        subject, catalog_number, course_code = _course_code_from_row(row)
+        subject, catalog_number, course_code = _course_code_from_row(
+            row,
+            known_subjects=known_subjects,
+        )
         if expected_subject is not None and subject != expected_subject:
             if strict_subject:
                 raise ResultParseError(

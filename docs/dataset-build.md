@@ -151,3 +151,41 @@ If one physical class number is cross-listed under multiple course codes, the AP
 - `2`: command/input failure, such as a missing checkpoint path or invalid CLI configuration.
 
 `--allow-validation-errors` can write candidate files for debugging, but invalid data is never installed as the active API file by default.
+
+
+## Future semester rotation
+
+Future terms should be scraped with an explicit semester. The scraper no longer defaults to an old term. `--all-subjects` performs a low-rate live Subject-facet preflight, writes `results/<term>/subject-inventory.json`, keeps the checked-in subject seed, and supplements it with newly observed SDSU codes. A seed subject that is not observed in one term is reported as `seed_subjects_not_observed`; it is not automatically treated as a deleted SDSU subject. If SDSU's facet service is temporarily unusable, `--known-subjects-only` is an explicit recovery escape hatch.
+
+```powershell
+.\.venv\Scripts\python.exe -m classcatalog.scraping.main `
+  --term "Fall 2027" `
+  --all-subjects `
+  --detail-limit 99999
+```
+
+The production builder now derives its default output directory from the scrape metadata, so a Fall 2027 checkpoint writes to `results/fall-2027-production` unless `--output-dir` is supplied. Term-code discovery fails closed when live landing-page data conflicts with a directly verified STRM; in that case verify SDSU and pass `--term-code` explicitly.
+
+Before publishing, preview an explicit rotation. The old term is never inferred from the calendar:
+
+```powershell
+.\.venv\Scripts\python.exe -m classcatalog.dataset.terms `
+  --api-data-path src\classcatalog\data\sections.json `
+  rotate `
+  --incoming results\fall-2027-production\sections.json `
+  --retire "Fall 2026"
+```
+
+The preview validates schema/uniqueness, the authoritative physical-section coverage model, a quick API behavior suite, SEO/sitemap generation, and reports subject/course/instructor inventory changes without writing active data. Use `--apply` only after reviewing those counts.
+
+On production, prefer the wrapper after uploading the already-built incoming `sections.json`:
+
+```bash
+sudo /opt/classcatalog/app/ops/rotate_inventory.sh \
+  --incoming /tmp/fall-2027-sections.json \
+  --retire "Fall 2026"
+```
+
+The production wrapper previews first, stops the service to avoid runtime-cache write races, backs up the active dataset plus seat/instructor caches, applies the validated candidate atomically, prunes cache rows for physical classes that are no longer active, restores file ownership/modes, starts ClassCatalog, and verifies health, `/api/options`, `/subjects`, and `/sitemap.xml`. If post-start verification fails it restores the previous dataset and caches and starts the old inventory again.
+
+Schedule-term rotation does not automatically replace `catalog_mappings.json`; catalog-year mapping maintenance remains a separate operation. Professor-rating synchronization can also be run separately for the reported new-instructor inventory. Browser favorites are never deleted or rewritten by term rotation.

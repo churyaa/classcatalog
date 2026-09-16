@@ -53,7 +53,7 @@ def test_discovers_term_codes_from_options() -> None:
     assert mapping == {
         "Summer 2026": "2261",
         "Fall 2026": "2267",
-        "Spring 2027": "2272",
+        "Spring 2027": "2273",
     }
 
 

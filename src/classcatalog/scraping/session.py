@@ -447,9 +447,16 @@ class SdsuPeopleSoftSession:
             return explicit_code
 
         discovered = self.discovered_term_codes()
-        if term in discovered:
-            return discovered[term]
+        discovered_code = discovered.get(term)
         confirmed = CONFIRMED_TERM_CODES.get(term)
+        if discovered_code is not None and confirmed is not None and discovered_code != confirmed:
+            raise PeopleSoftSessionError(
+                f"Discovered term code {discovered_code!r} for {term!r} conflicts with "
+                f"the confirmed value {confirmed!r}. Verify SDSU and pass --term-code "
+                "explicitly instead of guessing."
+            )
+        if discovered_code is not None:
+            return discovered_code
         if confirmed is not None:
             return confirmed
         available = ", ".join(f"{name}={code}" for name, code in sorted(discovered.items()))
@@ -457,6 +464,86 @@ class SdsuPeopleSoftSession:
             f"Could not discover a term code for {term!r}. Detected: {available or 'none'}. "
             "Pass the verified value with --term-code."
         )
+
+    def discover_subjects(
+        self,
+        *,
+        term_code: str,
+        probes: tuple[str, ...] = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    ) -> tuple[str, ...]:
+        """Discover live SDSU Subject facet codes without trusting static seed data.
+
+        This is a preflight inventory check, not the production scrape itself. Broad
+        alphabetic probes expose Subject facet values. When the result page defaults to
+        Open Classes, remove that filter first so subjects with only waitlisted/closed
+        offerings are not omitted. The caller still performs exact-subject searches for
+        every effective subject before accepting course rows.
+        """
+
+        self.bootstrap()
+        discovered: set[str] = set()
+        for raw_probe in probes:
+            probe = " ".join(str(raw_probe).strip().split())
+            if not probe:
+                continue
+            params = {**RESULT_QUERY_TEMPLATE, "SEARCH_TEXT": probe, "ES_STRM": term_code}
+            response = self._request("GET", self.config.results_url, params=params)
+            html = normalize_people_soft_response(response.text)
+            current_url = response.url
+
+            try:
+                open_only_facet = find_open_classes_only_facet(html)
+            except OpenClassesFacetNotFound:
+                open_only_facet = None
+
+            if open_only_facet is not None and open_only_facet.checked:
+                post = build_open_classes_only_post(
+                    html,
+                    current_url=current_url,
+                    enabled=False,
+                )
+                inclusive = self._request(
+                    "POST",
+                    post.action_url,
+                    data=post.fields,
+                    headers=self._partition_headers(current_url),
+                )
+                html = normalize_people_soft_response(inclusive.text)
+                current_url = inclusive.url
+                self._assert_open_only_disabled(
+                    html,
+                    context="The live-subject inventory response",
+                )
+            elif open_only_facet is None and self._open_only_selected(html):
+                post = build_selected_filter_remove_post(
+                    html,
+                    current_url=current_url,
+                    labels=("Open Classes", "Open Classes Only"),
+                )
+                inclusive = self._request(
+                    "POST",
+                    post.action_url,
+                    data=post.fields,
+                    headers=self._partition_headers(current_url),
+                )
+                html = normalize_people_soft_response(inclusive.text)
+                self._assert_open_only_disabled(
+                    html,
+                    context="The live-subject inventory response",
+                )
+
+            for choice in find_facet_choices(html, "Subject"):
+                code = " ".join(choice.label.split("/", maxsplit=1)[0].strip().upper().split())
+                if re.fullmatch(r"[A-Z]+(?: [A-Z]+)*", code):
+                    discovered.add(code)
+
+        if not discovered:
+            raise PeopleSoftSessionError(
+                "Could not discover any SDSU Subject facet values for the requested term. "
+                "Do not treat an empty live inventory as authoritative; retry later or use "
+                "--known-subjects-only explicitly."
+            )
+        return tuple(sorted(discovered))
 
     def build_search_request(self, *, subject: str, term_code: str) -> requests.Request:
         params = {**RESULT_QUERY_TEMPLATE, "SEARCH_TEXT": subject, "ES_STRM": term_code}
