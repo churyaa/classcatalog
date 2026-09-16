@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from datetime import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -470,3 +471,71 @@ def test_landing_pages_preserve_consent_gated_analytics() -> None:
         assert '/static/cookie-consent.css?v=1' in html
         assert '/static/cookie-consent.js?v=1' in html
         assert "https://www.googletagmanager.com/gtag/js?id=" not in html
+
+
+def test_subjects_and_course_pages_include_all_active_terms() -> None:
+    fall_shared = _section(
+        identifier="cs-210-fall",
+        course_code="CS 210",
+        subject="CS",
+        catalog_number="210",
+        schedule_number="21026",
+        title="Data Structures",
+    )
+    spring_shared = fall_shared.model_copy(
+        update={
+            "id": "cs-210-spring",
+            "term": "Spring 2027",
+            "term_code": "2273",
+            "schedule_number": "21027",
+        }
+    )
+    fall_only = _section(
+        identifier="cs-200-fall",
+        course_code="CS 200",
+        subject="CS",
+        catalog_number="200",
+        schedule_number="20026",
+        title="Fall Only Course",
+    )
+    spring_only = _section(
+        identifier="cs-220-spring",
+        course_code="CS 220",
+        subject="CS",
+        catalog_number="220",
+        schedule_number="22027",
+        title="Spring Only Course",
+    ).model_copy(update={"term": "Spring 2027", "term_code": "2273"})
+
+    client = _client(fall_shared, spring_shared, fall_only, spring_only)
+
+    subject_index = client.get("/subjects")
+    subject_page = client.get("/subjects/computer-science")
+    course_page = client.get("/courses/cs-210")
+
+    assert subject_index.status_code == 200
+    assert subject_page.status_code == 200
+    assert course_page.status_code == 200
+    assert "Fall 2026 &amp; Spring 2027" in subject_index.text
+    assert "Fall Only Course" in subject_page.text
+    assert "Spring Only Course" in subject_page.text
+    assert "Fall 2026 enrollment options" in course_page.text
+    assert "Spring 2027 enrollment options" in course_page.text
+    assert "21026" in course_page.text
+    assert "21027" in course_page.text
+    assert course_page.text.index("Fall 2026 enrollment options") < course_page.text.index(
+        "Spring 2027 enrollment options"
+    )
+
+
+def test_seo_course_table_keeps_seats_and_times_on_one_line() -> None:
+    root = Path(__file__).resolve().parents[1]
+    css = (root / "src/classcatalog/static/seo.css").read_text(encoding="utf-8")
+    template = (root / "src/classcatalog/templates/seo/course.html").read_text(encoding="utf-8")
+    base = (root / "src/classcatalog/templates/seo/base.html").read_text(encoding="utf-8")
+
+    assert ".seo-seat-cell { min-width: 90px; white-space: nowrap; }" in css
+    assert ".seo-time-cell { min-width: 210px; white-space: nowrap; }" in css
+    assert 'class="seo-seat-cell"' in template
+    assert "{% if not loop.last %} · {% endif %}" in template
+    assert "/static/seo.css?v=4" in base

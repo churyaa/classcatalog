@@ -531,7 +531,7 @@ def create_app(
     @app.get("/courses/{slug}", include_in_schema=False)
     async def course_page(slug: str) -> Response:
         course = seo_catalog.course_by_slug(slug.casefold())
-        if course is None or seo_catalog.primary_term is None:
+        if course is None:
             raise HTTPException(status_code=404, detail="Course not found.")
         if slug != course.slug:
             return Response(
@@ -540,7 +540,6 @@ def create_app(
             )
 
         options = active_repository.displayed_options(
-            term=seo_catalog.primary_term,
             course_code=course.course_code,
         )
         if not options:

@@ -51,6 +51,7 @@ class SeoSubject:
 @dataclass(frozen=True, slots=True)
 class SeoCatalog:
     primary_term: str | None
+    terms: tuple[str, ...]
     subjects: tuple[SeoSubject, ...]
     courses: tuple[SeoCourse, ...]
     _subjects_by_slug: dict[str, SeoSubject]
@@ -61,10 +62,10 @@ class SeoCatalog:
     def from_repository(cls, repository: CourseRepository) -> SeoCatalog:
         terms = repository.options().terms
         primary_term = terms[-1] if terms else None
-        if primary_term is None:
-            return cls(None, (), (), {}, {}, {})
+        if not terms:
+            return cls(None, (), (), (), {}, {}, {})
 
-        displayed = repository.displayed_options(term=primary_term)
+        displayed = repository.displayed_options()
         by_course: dict[str, list[CourseSection]] = defaultdict(list)
         for option in displayed:
             code = normalize_course_code(option.course_code)
@@ -114,6 +115,7 @@ class SeoCatalog:
         ordered_courses = tuple(sorted(courses, key=_course_sort_key))
         return cls(
             primary_term=primary_term,
+            terms=terms,
             subjects=ordered_subjects,
             courses=ordered_courses,
             _subjects_by_slug={item.slug: item for item in ordered_subjects},
@@ -148,7 +150,7 @@ class SeoRenderer:
         self._environment.filters["weekday"] = weekday_label
 
     def render_subject_index(self, catalog: SeoCatalog) -> str:
-        term = catalog.primary_term or "Current term"
+        term = _active_terms_label(catalog.terms)
         title = f"SDSU Subjects & Classes – {term} | ClassCatalog"
         description = (
             f"Browse SDSU subjects and classes for {term}. Explore course offerings, units, "
@@ -164,7 +166,7 @@ class SeoRenderer:
         )
 
     def render_subject(self, catalog: SeoCatalog, subject: SeoSubject) -> str:
-        term = catalog.primary_term or "Current term"
+        term = _active_terms_label(catalog.terms)
         title = f"SDSU {subject.name} Classes – {term} | ClassCatalog"
         description = (
             f"Browse SDSU {subject.name} classes for {term}, including course titles, units, "
@@ -191,12 +193,17 @@ class SeoRenderer:
         course: SeoCourse,
         options: tuple[CourseSection, ...],
     ) -> str:
-        term = catalog.primary_term or "Current term"
+        term = _active_terms_label(catalog.terms)
         title_text = (
             f"{course.course_code} – {course.title}" if course.title else course.course_code
         )
         page_title = f"SDSU {title_text} | {term} | ClassCatalog"
         meta_description = _course_meta_description(course, term)
+        options_by_term = tuple(
+            (term_name, tuple(option for option in options if option.term == term_name))
+            for term_name in catalog.terms
+            if any(option.term == term_name for option in options)
+        )
         return self._environment.get_template("course.html").render(
             page_title=page_title,
             meta_description=meta_description,
@@ -212,6 +219,7 @@ class SeoRenderer:
             term=term,
             course=course,
             options=options,
+            options_by_term=options_by_term,
         )
 
 
@@ -376,6 +384,16 @@ def _build_course(code: str, options: list[CourseSection]) -> SeoCourse:
             sorted({instruction_mode_label(option.instruction_mode) for option in options})
         ),
     )
+
+
+def _active_terms_label(terms: tuple[str, ...]) -> str:
+    if not terms:
+        return "Current terms"
+    if len(terms) == 1:
+        return terms[0]
+    if len(terms) == 2:
+        return f"{terms[0]} & {terms[1]}"
+    return f"{', '.join(terms[:-1])}, & {terms[-1]}"
 
 
 def _course_meta_description(course: SeoCourse, term: str) -> str:

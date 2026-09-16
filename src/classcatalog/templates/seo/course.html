@@ -26,9 +26,10 @@
   </details>
   {% endif %}
 
-  <section aria-labelledby="enrollment-options-title">
+  {% for option_term, term_options in options_by_term %}
+  <section class="seo-term-options" aria-labelledby="enrollment-options-title-{{ loop.index }}">
     <div class="seo-section-heading seo-section-heading-compact">
-      <h2 id="enrollment-options-title">{{ term }} enrollment options</h2>
+      <h2 id="enrollment-options-title-{{ loop.index }}">{{ option_term }} enrollment options</h2>
       <span>Seat status can change</span>
     </div>
     <div class="seo-table-wrap">
@@ -45,7 +46,7 @@
             <th scope="col">RateMyProfessors</th>
           </tr>
         </thead>
-        {% for option in options %}
+        {% for option in term_options %}
         <tbody class="seo-option-group">
           {% set class_rows = option.linked_components if option.linked_components else [option] %}
           {% for row in class_rows %}
@@ -56,10 +57,10 @@
             </td>
             <td>{{ row.instruction_mode | instruction_mode }}</td>
             <td><span class="seo-status seo-status-{{ row.seat_status.value }}">{{ row.seat_status | seat_status }}</span></td>
-            <td>{{ row | seat_count }}</td>
+            <td class="seo-seat-cell">{{ row | seat_count }}</td>
             <td class="seo-time-cell">
               {% if row.meetings %}
-                {% for meeting in row.meetings %}<span>{{ meeting | meeting_time }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
+                {% for meeting in row.meetings %}<span>{{ meeting | meeting_time }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
               {% else %}TBA{% endif %}
             </td>
             <td class="seo-location-cell">
@@ -89,6 +90,7 @@
       </table>
     </div>
   </section>
+  {% endfor %}
 
   <p class="seo-back-link"><a href="/subjects/{{ course.subject_slug }}">Browse all {{ course.subject_name }} courses</a></p>
 {% endblock %}

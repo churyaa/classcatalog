@@ -31,7 +31,8 @@
 .seo-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin: 1.5rem 0 .7rem; }
 .seo-section-heading-compact h2 { margin: 0; font-size: 1.15rem; }
 .seo-section-heading-compact span { font-size: .83rem; opacity: .7; }
-.seo-option-table { min-width: 1080px; }
+.seo-option-table { min-width: 1180px; }
+.seo-term-options + .seo-term-options { margin-top: 1.8rem; }
 .seo-option-group + .seo-option-group tr:first-child td { border-top-width: 2px; }
 .seo-class-number { white-space: nowrap; }
 .seo-class-number small { display: block; margin-top: .12rem; font-size: .72rem; opacity: .68; font-weight: 500; }
@@ -40,7 +41,9 @@
 .seo-status-waitlist { color: var(--orange, #9a6410); }
 .seo-status-closed { color: var(--red, #b42318); }
 .seo-status-unknown { opacity: .65; }
-.seo-time-cell, .seo-location-cell { min-width: 145px; }
+.seo-seat-cell { min-width: 90px; white-space: nowrap; }
+.seo-time-cell { min-width: 210px; white-space: nowrap; }
+.seo-location-cell { min-width: 145px; }
 .seo-rmp-cell { min-width: 205px; }
 .seo-rmp-cell a { color: inherit; text-decoration: none; }
 .seo-rmp-cell a:hover .seo-rmp-primary { color: var(--accent, inherit); text-decoration: underline; }
