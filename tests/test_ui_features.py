@@ -271,8 +271,29 @@ def test_active_filter_summary_collapses_completed_courses_to_one_chip() -> None
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")
 
     assert 'if (key === "completed_course")' in javascript
-    assert 'chip.textContent = "completed courses";' in javascript
+    assert 'appendActiveFilterChip(container, "completed courses", key, value);' in javascript
     assert "completedCoursesChipAdded" in javascript
+
+
+def test_active_filter_chips_can_remove_their_filters_except_term() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert "function removeActiveFilter(key, value)" in javascript
+    assert "function appendActiveFilterChip(container, label, key, value, { removable = true } = {})" in javascript
+    assert 'remove.className = "filter-chip-remove";' in javascript
+    assert 'remove.addEventListener("click", () => removeActiveFilter(key, value));' in javascript
+    assert 'if (key === "major_only" && value === "false") return;' in javascript
+    assert 'setCompletedCourseValues([], { refresh: false });' in javascript
+    assert 'if (key === "term") {' in javascript
+    assert 'appendActiveFilterChip(container, `term: ${value}`, key, value, { removable: false });' in javascript
+    assert 'state.selectedTerm = "";' not in javascript
+    assert '.filter-chip:hover .filter-chip-remove' in css
+    assert '.filter-chip:focus-within .filter-chip-remove' in css
+    assert "background: #c62828;" in css
+    assert "filters=5" in html
+    assert "filters=4" in html
 
 
 def test_completed_courses_use_autocomplete_picker() -> None:

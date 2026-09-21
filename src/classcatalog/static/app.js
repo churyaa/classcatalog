@@ -2601,6 +2601,90 @@ function renderCourses(data) {
   renderPagination(data);
 }
 
+function removeActiveFilter(key, value) {
+  const checkboxKeys = new Set([
+    "campus",
+    "requirement",
+    "grading",
+    "classification",
+    "instruction_mode",
+    "seat_status",
+  ]);
+  let profileChanged = false;
+
+  if (checkboxKeys.has(key)) {
+    document.querySelectorAll(`input[name="${key}"]`).forEach((input) => {
+      if (input.value === value) input.checked = false;
+    });
+  } else if (key === "q") {
+    document.querySelector("#query").value = "";
+  } else if (key === "program") {
+    document.querySelector("#program").value = "";
+    persistMajorProgram("");
+    syncClassificationAvailability();
+    profileChanged = true;
+  } else if (key === "catalog_year") {
+    document.querySelector("#catalog-year").value = "";
+    syncClassificationAvailability();
+    profileChanged = true;
+  } else if (key === "major_only") {
+    document.querySelector("#major-only").checked = false;
+  } else if (key === "completed_course") {
+    setCompletedCourseValues([], { refresh: false });
+    closeCompletedCourseSuggestions();
+    profileChanged = true;
+  } else if (key === "day" || key === "exclude_day") {
+    const button = [...document.querySelectorAll("#days .day-toggle")]
+      .find((item) => item.dataset.day === value);
+    if (button) {
+      button.dataset.state = "off";
+      const label = button.textContent.trim();
+      button.setAttribute("aria-label", `${label}: not filtered. Click to include.`);
+    }
+  } else {
+    const targetIds = {
+      units_min: "units-min",
+      units_max: "units-max",
+      time_from: "time-from",
+      time_to: "time-to",
+      rating_min: "rating-min",
+      difficulty_max: "difficulty-max",
+      would_take_again_min: "would-take-again-min",
+      reviews_min: "reviews-min",
+    };
+    const targetId = targetIds[key];
+    if (!targetId) return;
+    const control = document.querySelector(`#${targetId}`);
+    if (control) control.value = "";
+  }
+
+  if (profileChanged) scheduleProgramSummary();
+  scheduleLoad();
+}
+
+function appendActiveFilterChip(container, label, key, value, { removable = true } = {}) {
+  const chip = document.createElement("span");
+  chip.className = "filter-chip";
+
+  const text = document.createElement("span");
+  text.className = "filter-chip-label";
+  text.textContent = label;
+  chip.appendChild(text);
+
+  if (removable) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "filter-chip-remove";
+    remove.setAttribute("aria-label", `Remove filter ${label}`);
+    remove.title = `Remove ${label}`;
+    remove.textContent = "×";
+    remove.addEventListener("click", () => removeActiveFilter(key, value));
+    chip.appendChild(remove);
+  }
+
+  container.appendChild(chip);
+}
+
 function renderActiveFilters(params) {
   const container = document.querySelector("#active-filters");
   container.replaceChildren();
@@ -2609,21 +2693,27 @@ function renderActiveFilters(params) {
   let completedCoursesChipAdded = false;
 
   entries.forEach(([key, value]) => {
-    if (key === "completed_course") {
-      if (completedCoursesChipAdded) return;
-      completedCoursesChipAdded = true;
-      const chip = document.createElement("span");
-      chip.className = "filter-chip";
-      chip.textContent = "completed courses";
-      container.appendChild(chip);
+    // major_only=false is the non-restrictive state required by the API because its
+    // server-side default is true. Keep sending it, but do not present it as an active filter.
+    if (key === "major_only" && value === "false") return;
+
+    // The semester is a required single-choice state. It may be changed with the
+    // term buttons, but it cannot be cleared from the active-filter summary.
+    if (key === "term") {
+      appendActiveFilterChip(container, `term: ${value}`, key, value, { removable: false });
       return;
     }
 
-    const chip = document.createElement("span");
-    chip.className = "filter-chip";
+    if (key === "completed_course") {
+      if (completedCoursesChipAdded) return;
+      completedCoursesChipAdded = true;
+      appendActiveFilterChip(container, "completed courses", key, value);
+      return;
+    }
+
     const displayKey = key === "exclude_day" ? "exclude day" : key.replaceAll("_", " ");
-    chip.textContent = `${displayKey}: ${labels[value] || dayLabels[value] || value}`;
-    container.appendChild(chip);
+    const label = `${displayKey}: ${labels[value] || dayLabels[value] || value}`;
+    appendActiveFilterChip(container, label, key, value);
   });
 }
 
