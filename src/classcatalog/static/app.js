@@ -866,7 +866,7 @@ function closeScheduleDrawer({ focusToggle = false } = {}) {
   drawer?.classList.remove("is-open");
   drawer?.setAttribute("aria-hidden", "true");
   nav?.setAttribute("aria-expanded", "false");
-  if (focusToggle) nav?.focus();
+  if (focusToggle) nav?.focus({ preventScroll: true });
 }
 
 function setupScheduleDrawer() {
@@ -1860,7 +1860,7 @@ function componentProfessorSummary(component) {
 function componentRows(section) {
   const components = section.linked_components || [];
   if (components.length < 2) return "";
-  const rows = components.map((component, index) => {
+  const rows = components.map((component) => {
     const seats = componentSeatSummary(component);
     const sectionText = component.section_number ? `Section ${component.section_number}` : "";
     return `
@@ -1873,10 +1873,7 @@ function componentRows(section) {
         <div class="component-cell" role="cell">${escapeHtml(meetingText(component.meetings || []))}</div>
         <div class="component-cell" role="cell">${escapeHtml(meetingLocationText(component.meetings || [], component.location))}</div>
         <div class="component-cell component-professor" role="cell">
-          <div class="component-professor-layout${index === 0 ? " with-schedule" : ""}">
-            ${index === 0 ? scheduleActionButtonMarkup() : ""}
-            <div class="component-professor-copy">${componentProfessorSummary(component)}</div>
-          </div>
+          <div class="component-professor-copy">${componentProfessorSummary(component)}</div>
         </div>
         <div class="component-cell component-seats" role="cell">
           <span class="component-seat ${escapeHtml(seats.status)}">${escapeHtml(seats.primary)}</span>
@@ -1887,7 +1884,9 @@ function componentRows(section) {
   }).join("");
   return `
     <div class="component-group" aria-label="Class option components">
-      <div class="component-group-title">Class components</div>
+      <div class="component-group-toolbar">
+        <div class="component-group-title">Class components</div>
+      </div>
       <div class="component-table" role="table" aria-label="Classes included in this option">
         <div class="component-header" role="row">
           <div role="columnheader">Class</div>
@@ -1966,23 +1965,26 @@ function courseCard(section, { tooltipPrefix = "course-description" } = {}) {
 
   card.innerHTML = `
     <div>
-      <div class="course-top">
-        <div class="course-code-wrap">
-          <p class="course-code">${escapeHtml(section.course_code)}</p>
-          <button class="course-info" type="button" aria-label="Description for ${escapeHtml(section.course_code)}" aria-describedby="${tooltipId}">
-            <span aria-hidden="true">i</span>
-            <span id="${tooltipId}" class="course-tooltip" role="tooltip">${escapeHtml(description)}</span>
-          </button>
-          <button class="course-favorite" type="button" aria-label="Add ${escapeHtml(section.course_code)} ${escapeHtml(section.title)} to favorites" aria-pressed="false">
-            <svg class="favorite-star-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 2.75l2.77 5.61 6.19.9-4.48 4.37 1.06 6.17L12 16.88 6.46 19.8l1.06-6.17-4.48-4.37 6.19-.9L12 2.75z"></path>
-            </svg>
-          </button>
+      <div class="course-card-heading-row${grouped ? " is-grouped" : ""}">
+        <div class="course-top">
+          <div class="course-code-wrap">
+            <p class="course-code">${escapeHtml(section.course_code)}</p>
+            <button class="course-info" type="button" aria-label="Description for ${escapeHtml(section.course_code)}" aria-describedby="${tooltipId}">
+              <span aria-hidden="true">i</span>
+              <span id="${tooltipId}" class="course-tooltip" role="tooltip">${escapeHtml(description)}</span>
+            </button>
+            <button class="course-favorite" type="button" aria-label="Add ${escapeHtml(section.course_code)} ${escapeHtml(section.title)} to favorites" aria-pressed="false">
+              <svg class="favorite-star-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2.75l2.77 5.61 6.19.9-4.48 4.37 1.06 6.17L12 16.88 6.46 19.8l1.06-6.17-4.48-4.37 6.19-.9L12 2.75z"></path>
+              </svg>
+            </button>
+          </div>
+          <div>
+            <h3>${escapeHtml(section.title)}</h3>
+            <p class="course-meta">${groupedMeta}</p>
+          </div>
         </div>
-        <div>
-          <h3>${escapeHtml(section.title)}</h3>
-          <p class="course-meta">${groupedMeta}</p>
-        </div>
+        ${grouped ? `<div class="grouped-schedule-side">${scheduleActionButtonMarkup()}</div>` : ""}
       </div>
       ${grouped ? `<div class="badges grouped-badges">${groupedTags.join("")}</div>${componentRows(section)}` : ""}
       ${grouped ? groupedSharedInfo : `<div class="badges">${singleTags.join("")}</div>${singleGrid}`}
@@ -3297,6 +3299,12 @@ function resetTimeFilter(targetId) {
 }
 
 function syncStickyFilterOffset() {
+  const header = document.querySelector(".site-header");
+  if (header) {
+    const headerHeight = Math.ceil(header.getBoundingClientRect().height);
+    document.documentElement.style.setProperty("--site-header-sticky-height", `${headerHeight}px`);
+  }
+
   const toolbar = document.querySelector(".toolbar");
   if (!toolbar) return;
   const toolbarHeight = Math.ceil(toolbar.getBoundingClientRect().height);

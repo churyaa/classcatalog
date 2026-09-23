@@ -564,7 +564,7 @@ def test_visual_schedule_builder_drawer_and_overlap_controls_are_present() -> No
     assert 'function renderScheduleDetail(section, key)' in javascript
     assert 'remove.textContent = "Remove from Schedule";' in javascript
     assert 'function refreshScheduleSeats()' in javascript
-    assert 'component-professor-layout${index === 0 ? " with-schedule" : ""}' in javascript
+    assert 'class="component-group-toolbar"' in javascript
     assert '.schedule-drawer {' in css
     assert 'width: min(820px, 72vw);' in css
     assert 'background: color-mix(in srgb, var(--theme-accent) var(--schedule-tint), var(--surface-raised));' in css
@@ -580,8 +580,8 @@ def test_schedule_button_does_not_compress_professor_panel() -> None:
     assert "#course-list .course-card:not(.course-card-grouped)" in css
     assert "minmax(360px, .95fr)" in css
     assert "grid-template-columns: minmax(7.6rem, 8.4rem) minmax(13.5rem, 1fr);" in css
-    assert ".component-professor-layout.with-schedule {" in css
-    assert "grid-template-columns: 1fr;" in css
+    assert ".component-group-toolbar {" in css
+    assert ".component-group-toolbar > .schedule-add-button {" in css
     assert "schedulelayout=1" in html
 
 
@@ -592,3 +592,54 @@ def test_schedule_drawer_omits_redundant_calendar_toolbar() -> None:
     assert "Weekly calendar" not in html
     assert "Click a class for full details" not in html
     assert 'class="schedule-calendar-toolbar"' not in html
+
+def test_grouped_schedule_button_uses_component_header_area() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="component-group-toolbar"' in javascript
+    assert '<div class="component-group-title">Class components</div>' in javascript
+    assert '${scheduleActionButtonMarkup()}' in javascript
+    assert 'component-professor-layout${index === 0 ? " with-schedule" : ""}' not in javascript
+    assert '.component-group-toolbar {' in css
+    assert '.component-group-toolbar > .schedule-add-button {' in css
+    assert 'groupedschedule=1' in html
+
+
+
+
+def test_sticky_header_keeps_navigation_available_and_schedule_close_preserves_scroll() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert 'nav?.focus({ preventScroll: true });' in javascript
+    assert '--site-header-sticky-height' in javascript
+    assert 'document.querySelector(".site-header")' in javascript
+    assert "Sticky primary header + schedule close scroll preservation" in css
+    assert ".site-header {" in css
+    assert "position: sticky;" in css
+    assert "z-index: 65;" in css
+    assert ".toolbar {" in css
+    assert "top: var(--site-header-sticky-height);" in css
+    assert "top: calc(var(--site-header-sticky-height) + var(--toolbar-sticky-height) + 1rem);" in css
+    assert "scrollnav=1" in html
+
+def test_schedule_layout_polish_keeps_professor_full_height_and_aligns_grouped_action() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert 'class="course-card-heading-row${grouped ? " is-grouped" : ""}"' in javascript
+    assert 'class="grouped-schedule-side"' in javascript
+    assert '<div class="component-group-toolbar">' in javascript
+    assert '<div class="component-group-title">Class components</div>' in javascript
+    assert '.course-side-panel > .professor-panel {' in css
+    assert 'height: 100%;' in css
+    assert '.course-card-heading-row.is-grouped {' in css
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(360px, .95fr);' in css
+    assert '.grouped-schedule-side > .schedule-add-button {' in css
+    assert 'width: calc(100% - .25rem);' in css
+    assert 'layoutpolish=1' in html
+

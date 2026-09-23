@@ -2588,3 +2588,120 @@ button:focus-visible {
   .course-side-panel { grid-template-columns: 1fr; }
   .course-side-panel > .schedule-add-button { width: min(100%, 13rem); }
 }
+/* Grouped schedule action: use the empty area above the component table. */
+.component-group-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-bottom: .38rem;
+}
+.component-group-toolbar .component-group-title {
+  margin: 0;
+}
+.component-group-toolbar > .schedule-add-button {
+  width: min(11.5rem, 100%);
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .component-group-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .component-group-toolbar > .schedule-add-button {
+    width: min(100%, 13rem);
+    align-self: flex-end;
+  }
+}
+
+
+/* Sticky primary header + schedule close scroll preservation ---------------- */
+/* Keep the navigation controls available while browsing long result lists. */
+:root {
+  --site-header-sticky-height: 4.5rem;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 65;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  background: color-mix(in srgb, var(--theme-background) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* The search toolbar remains sticky immediately below the persistent header. */
+.toolbar {
+  top: var(--site-header-sticky-height);
+}
+
+@media (min-width: 761px) {
+  .filters {
+    top: calc(var(--site-header-sticky-height) + var(--toolbar-sticky-height) + 1rem);
+    max-height: calc(100vh - var(--site-header-sticky-height) - var(--toolbar-sticky-height) - 2rem);
+  }
+}
+/* Schedule/course layout polish ------------------------------------------- */
+/* Keep the professor panel at the full card height while the schedule action
+   remains a compact button at the top of its column. */
+.course-side-panel {
+  align-self: stretch;
+  align-items: stretch;
+}
+.course-side-panel > .schedule-add-button {
+  align-self: start;
+}
+.course-side-panel > .professor-panel {
+  height: 100%;
+  min-height: 100%;
+}
+
+/* Grouped class options use the same horizontal tracks as a normal course
+   card. This puts Add to Schedule at the same top position and x-coordinate
+   as the button on single-section cards. */
+.course-card-heading-row.is-grouped {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, .95fr);
+  gap: 1rem;
+  align-items: start;
+}
+.grouped-schedule-side {
+  display: grid;
+  grid-template-columns: minmax(7.6rem, 8.4rem) minmax(13.5rem, 1fr);
+  gap: .65rem;
+  align-items: start;
+}
+.grouped-schedule-side > .schedule-add-button {
+  grid-column: 1;
+  width: 100%;
+}
+
+/* The results column keeps .25rem of right breathing room. Match the search
+   toolbar's right edge to the course-card edge instead of extending past it. */
+@media (min-width: 761px) {
+  .toolbar {
+    width: calc(100% - .25rem);
+  }
+}
+
+@media (max-width: 1050px) {
+  .course-card-heading-row.is-grouped {
+    grid-template-columns: 1fr;
+  }
+  .grouped-schedule-side {
+    grid-template-columns: minmax(7.6rem, 9rem) minmax(13.5rem, 1fr);
+    margin-top: .65rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .grouped-schedule-side {
+    grid-template-columns: 1fr;
+  }
+  .grouped-schedule-side > .schedule-add-button {
+    width: min(100%, 13rem);
+  }
+}
+
