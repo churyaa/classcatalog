@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <link rel="icon" type="image/svg+xml" href="/static/classcatalog_favicon.svg?v=1" data-theme-favicon>
+  <link rel="icon" type="image/svg+xml" href="/static/classcatalog_favicon.svg?v=1&amp;inboxdrawer=1" data-theme-favicon>
   <link rel="shortcut icon" href="/static/classcatalog_favicon.svg?v=1" data-theme-favicon>
   <link rel="mask-icon" href="/static/classcatalog_favicon.svg?v=1" color="#a6192e" data-theme-favicon-mask>
 <link rel="shortcut icon" href="/static/classcatalog_favicon.svg?v=1" data-theme-favicon>
@@ -43,7 +43,7 @@
       if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=60&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
+  <link rel="stylesheet" href="/static/styles.css?v=60&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
   <link rel="stylesheet" href="/static/legal.css?v=1">
   <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
   <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
@@ -92,6 +92,13 @@
           </svg>
           <span class="header-nav-label">Subjects</span>
         </a>
+        <button id="inbox-nav" class="header-nav-button inbox-nav-button" type="button" aria-label="Inbox" title="Inbox" aria-controls="inbox-drawer" aria-expanded="false">
+          <svg class="header-nav-icon inbox-bell-icon" viewBox="0 0 611.999 611.999" aria-hidden="true" focusable="false">
+            <path d="M570.107 500.254c-65.037-29.371-67.511-155.441-67.559-158.622v-84.578c0-81.402-49.742-151.399-120.427-181.203C381.969 34 347.883 0 306.001 0c-41.883 0-75.968 34.002-76.121 75.849-70.682 29.804-120.425 99.801-120.425 181.203v84.578c-.046 3.181-2.522 129.251-67.561 158.622-7.409 3.347-11.481 11.412-9.768 19.36 1.711 7.949 8.74 13.626 16.871 13.626h164.88c3.38 18.594 12.172 35.892 25.619 49.903 17.86 18.608 41.479 28.856 66.502 28.856 25.025 0 48.644-10.248 66.502-28.856 13.449-14.012 22.241-31.311 25.619-49.903h164.88c8.131 0 15.159-5.676 16.872-13.626 1.715-7.948-2.355-16.012-9.764-19.358zM484.434 439.859c6.837 20.728 16.518 41.544 30.246 58.866H97.32c13.726-17.32 23.407-38.135 30.244-58.866h356.87zM306.001 34.515c18.945 0 34.963 12.73 39.975 30.082-12.912-2.678-26.282-4.09-39.975-4.09s-27.063 1.411-39.975 4.09c5.013-17.351 21.031-30.082 39.975-30.082zM143.97 341.736v-84.685c0-89.343 72.686-162.029 162.031-162.029s162.031 72.686 162.031 162.029v84.826c.023 2.596.427 29.879 7.303 63.465H136.663c6.88-33.618 7.286-60.949 7.307-63.606zM306.001 577.485c-26.341 0-49.33-18.992-56.709-44.246h113.416c-7.379 25.254-30.364 44.246-56.707 44.246z"/>
+          </svg>
+          <span class="header-nav-label">Inbox</span>
+          <span id="inbox-count" class="header-nav-count">0</span>
+        </button>
         <button id="schedule-nav" class="header-nav-button schedule-nav-button" type="button" aria-label="Schedule" title="Schedule" aria-controls="schedule-drawer" aria-expanded="false">
           <svg class="header-nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M10 21H6.2C5.0799 21 4.51984 21 4.09202 20.782C3.71569 20.5903 3.40973 20.2843 3.21799 19.908C3 19.4802 3 18.9201 3 17.8V8.2C3 7.0799 3 6.51984 3.21799 6.09202C3.40973 5.71569 3.71569 5.40973 4.09202 5.21799C4.51984 5 5.0799 5 6.2 5H17.8C18.9201 5 19.4802 5 19.908 5.21799C20.2843 5.40973 20.5903 5.71569 20.782 6.09202C21 6.51984 21 7.0799 21 8.2V10M7 3V5M17 3V5M3 9H21M13.5 13.0001L7 13M10 17.0001L7 17M14 21L16.025 20.595C16.2015 20.5597 16.2898 20.542 16.3721 20.5097C16.4452 20.4811 16.5147 20.4439 16.579 20.399C16.6516 20.3484 16.7152 20.2848 16.8426 20.1574L21 16C21.5523 15.4477 21.5523 14.5523 21 14C20.4477 13.4477 19.5523 13.4477 19 14L14.8426 18.1574C14.7152 18.2848 14.6516 18.3484 14.601 18.421C14.5561 18.4853 14.5189 18.5548 14.4903 18.6279C14.458 18.7102 14.4403 18.7985 14.405 18.975L14 21Z"></path>
@@ -146,6 +153,25 @@
         </div>
         <div id="schedule-detail-content" class="schedule-detail-content"></div>
       </section>
+    </div>
+  </aside>
+
+  <aside id="inbox-drawer" class="inbox-drawer" aria-label="Inbox" aria-hidden="true" inert>
+    <div class="inbox-drawer-header">
+      <div class="inbox-drawer-title">
+        <svg class="inbox-bell-icon" viewBox="0 0 611.999 611.999" aria-hidden="true" focusable="false">
+          <path d="M570.107 500.254c-65.037-29.371-67.511-155.441-67.559-158.622v-84.578c0-81.402-49.742-151.399-120.427-181.203C381.969 34 347.883 0 306.001 0c-41.883 0-75.968 34.002-76.121 75.849-70.682 29.804-120.425 99.801-120.425 181.203v84.578c-.046 3.181-2.522 129.251-67.561 158.622-7.409 3.347-11.481 11.412-9.768 19.36 1.711 7.949 8.74 13.626 16.871 13.626h164.88c3.38 18.594 12.172 35.892 25.619 49.903 17.86 18.608 41.479 28.856 66.502 28.856 25.025 0 48.644-10.248 66.502-28.856 13.449-14.012 22.241-31.311 25.619-49.903h164.88c8.131 0 15.159-5.676 16.872-13.626 1.715-7.948-2.355-16.012-9.764-19.358z"/>
+        </svg>
+        <div>
+          <h2>Inbox</h2>
+          <p id="inbox-subtitle">0 messages</p>
+        </div>
+      </div>
+      <button id="inbox-close" class="inbox-drawer-close" type="button" aria-label="Close inbox">×</button>
+    </div>
+    <div class="inbox-drawer-body">
+      <p id="inbox-empty" class="inbox-empty">No announcements yet.</p>
+      <div id="inbox-message-list" class="inbox-message-list"></div>
     </div>
   </aside>
 
@@ -462,6 +488,54 @@
             </div>
           </div>
           <p id="admin-checked-at" class="admin-checked-at"></p>
+        </section>
+
+
+        <section class="admin-section" aria-labelledby="admin-announcements-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Student communication</p>
+              <h3 id="admin-announcements-title">Inbox announcements</h3>
+            </div>
+          </div>
+          <form id="admin-announcement-form" class="admin-announcement-form">
+            <div class="admin-announcement-fields">
+              <label for="admin-announcement-title">Title
+                <input id="admin-announcement-title" type="text" maxlength="120" placeholder="Registration update" autocomplete="off" data-no-search required>
+              </label>
+              <label for="admin-announcement-message">Message
+                <textarea id="admin-announcement-message" maxlength="2000" placeholder="Write an announcement for every ClassCatalog visitor…" data-no-search required></textarea>
+              </label>
+              <button id="admin-announcement-send" class="admin-refresh" type="submit">Send Announcement</button>
+            </div>
+            <p id="admin-announcement-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+          </form>
+          <div id="admin-announcement-history" class="admin-announcement-history"></div>
+        </section>
+
+        <section class="admin-section" aria-labelledby="admin-operations-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Scrape and inventory intelligence</p>
+              <h3 id="admin-operations-title">Operations overview</h3>
+            </div>
+          </div>
+          <div id="admin-operations-metrics" class="admin-metric-grid"></div>
+          <p id="admin-operations-note" class="admin-note"></p>
+          <div class="admin-ops-detail-grid">
+            <div class="admin-ops-panel">
+              <h4>Term coverage</h4>
+              <div id="admin-term-coverage" class="admin-ops-list"></div>
+            </div>
+            <div class="admin-ops-panel">
+              <h4>Subject changes</h4>
+              <div id="admin-subject-changes"></div>
+            </div>
+            <div class="admin-ops-panel">
+              <h4>Professor matching failures</h4>
+              <div id="admin-professor-match-failures" class="admin-professor-failure-list"></div>
+            </div>
+          </div>
         </section>
 
         <section class="admin-section" aria-labelledby="admin-seats-title">
@@ -1219,7 +1293,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=62&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
+<script src="/static/app.js?v=62&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>

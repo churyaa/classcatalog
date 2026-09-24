@@ -643,3 +643,24 @@ def test_schedule_layout_polish_keeps_professor_full_height_and_aligns_grouped_a
     assert 'width: calc(100% - .25rem);' in css
     assert 'layoutpolish=1' in html
 
+
+def test_inbox_drawer_and_admin_announcement_ui_are_present() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert 'id="inbox-nav"' in html
+    assert 'id="inbox-count" class="header-nav-count"' in html
+    assert 'id="inbox-drawer"' in html
+    assert 'id="admin-announcement-form"' in html
+    assert 'id="admin-operations-metrics"' in html
+    assert 'id="admin-term-coverage"' in html
+    assert 'id="admin-professor-match-failures"' in html
+    assert 'const inboxReadStorageKey = "classcatalog_inbox_read_v1";' in javascript
+    assert 'function openInboxDrawer()' in javascript
+    assert 'function sendAdminAnnouncement(event)' in javascript
+    assert 'function renderAdminOperations(data)' in javascript
+    assert 'nav?.focus({ preventScroll: true });' in javascript
+    assert '.inbox-drawer {' in css
+    assert '.admin-ops-detail-grid {' in css
+

@@ -25,6 +25,8 @@ const state = {
   serviceMessages: {},
   scheduleDrawerOpen: false,
   scheduleDetailKey: null,
+  inboxDrawerOpen: false,
+  announcements: [],
 };
 
 const themeCookieName = "classcatalog_theme";
@@ -434,6 +436,233 @@ function applySeatRecordsToFavorite(section, records) {
     applySeatRecord(component, records[seatRecordKey({ ...component, term: section.term })])
   );
   return { ...primary, linked_components: linked };
+}
+
+const inboxReadStorageKey = "classcatalog_inbox_read_v1";
+
+function readInboxReadIds() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(inboxReadStorageKey) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeInboxReadIds(ids) {
+  try {
+    window.localStorage.setItem(inboxReadStorageKey, JSON.stringify([...ids]));
+  } catch {
+    // Inbox read state is only a browser convenience.
+  }
+}
+
+function announcementAge(value) {
+  const timestamp = Date.parse(value || "");
+  if (!Number.isFinite(timestamp)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? "" : "s"} ago`;
+}
+
+function unreadAnnouncementCount() {
+  const read = readInboxReadIds();
+  return state.announcements.filter((item) => item?.id && !read.has(String(item.id))).length;
+}
+
+function updateInboxCount() {
+  const count = document.querySelector("#inbox-count");
+  if (!count) return;
+  count.textContent = String(unreadAnnouncementCount());
+}
+
+function renderInboxDrawer() {
+  const list = document.querySelector("#inbox-message-list");
+  const empty = document.querySelector("#inbox-empty");
+  const subtitle = document.querySelector("#inbox-subtitle");
+  if (!list || !empty) return;
+
+  list.replaceChildren();
+  const messages = Array.isArray(state.announcements) ? state.announcements : [];
+  empty.hidden = messages.length > 0;
+  if (subtitle) subtitle.textContent = `${messages.length} message${messages.length === 1 ? "" : "s"}`;
+
+  messages.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "inbox-message";
+
+    const meta = document.createElement("p");
+    meta.className = "inbox-message-age";
+    meta.textContent = announcementAge(item.created_at);
+
+    const title = document.createElement("h3");
+    title.textContent = item.title || "Announcement";
+
+    const body = document.createElement("p");
+    body.className = "inbox-message-body";
+    body.textContent = item.message || "";
+
+    article.append(meta, title, body);
+    list.appendChild(article);
+  });
+}
+
+function markCurrentAnnouncementsRead() {
+  const read = readInboxReadIds();
+  state.announcements.forEach((item) => {
+    if (item?.id) read.add(String(item.id));
+  });
+  writeInboxReadIds(read);
+  updateInboxCount();
+}
+
+async function loadAnnouncements() {
+  try {
+    const payload = await fetchJson("/api/announcements", { cache: "no-store" });
+    state.announcements = Array.isArray(payload.messages) ? payload.messages : [];
+    updateInboxCount();
+    renderAdminAnnouncementHistory();
+    if (state.inboxDrawerOpen) renderInboxDrawer();
+  } catch {
+    // Announcements should never interfere with class browsing.
+  }
+}
+
+function openInboxDrawer() {
+  const drawer = document.querySelector("#inbox-drawer");
+  const nav = document.querySelector("#inbox-nav");
+  if (!drawer) return;
+  if (state.scheduleDrawerOpen) closeScheduleDrawer();
+  state.inboxDrawerOpen = true;
+  drawer.inert = false;
+  drawer.classList.add("is-open");
+  drawer.setAttribute("aria-hidden", "false");
+  nav?.setAttribute("aria-expanded", "true");
+  renderInboxDrawer();
+  markCurrentAnnouncementsRead();
+}
+
+function closeInboxDrawer({ focusToggle = false } = {}) {
+  const drawer = document.querySelector("#inbox-drawer");
+  const nav = document.querySelector("#inbox-nav");
+  state.inboxDrawerOpen = false;
+  if (drawer) drawer.inert = true;
+  drawer?.classList.remove("is-open");
+  drawer?.setAttribute("aria-hidden", "true");
+  nav?.setAttribute("aria-expanded", "false");
+  if (focusToggle) nav?.focus({ preventScroll: true });
+}
+
+function setupInboxDrawer() {
+  const nav = document.querySelector("#inbox-nav");
+  const close = document.querySelector("#inbox-close");
+  if (!nav) return;
+  nav.addEventListener("click", () => {
+    if (state.inboxDrawerOpen) closeInboxDrawer({ focusToggle: true });
+    else openInboxDrawer();
+  });
+  close?.addEventListener("click", () => closeInboxDrawer({ focusToggle: true }));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.inboxDrawerOpen) {
+      closeInboxDrawer({ focusToggle: true });
+    }
+  });
+  updateInboxCount();
+}
+
+function renderAdminAnnouncementHistory() {
+  const list = document.querySelector("#admin-announcement-history");
+  if (!list) return;
+  list.replaceChildren();
+  const messages = Array.isArray(state.announcements) ? state.announcements : [];
+  if (!messages.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-note";
+    empty.textContent = "No announcements have been sent yet.";
+    list.appendChild(empty);
+    return;
+  }
+  messages.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "admin-announcement-history-item";
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.title || "Announcement";
+    const meta = document.createElement("span");
+    meta.textContent = adminDate(item.created_at);
+    const body = document.createElement("p");
+    body.textContent = item.message || "";
+    copy.append(title, meta, body);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "admin-refresh";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", () => deleteAdminAnnouncement(item.id, remove));
+    row.append(copy, remove);
+    list.appendChild(row);
+  });
+}
+
+async function sendAdminAnnouncement(event) {
+  event.preventDefault();
+  const title = document.querySelector("#admin-announcement-title");
+  const message = document.querySelector("#admin-announcement-message");
+  const button = document.querySelector("#admin-announcement-send");
+  const result = document.querySelector("#admin-announcement-result");
+  if (!title || !message || !button) return;
+  button.disabled = true;
+  if (result) {
+    result.textContent = "Sending announcement…";
+    result.className = "admin-seat-refresh-result";
+  }
+  try {
+    await fetchJson("/api/admin/announcements", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title.value.trim(), message: message.value.trim() }),
+    }, { fallbackMessage: "Announcement could not be sent.", allowDetail: true });
+    title.value = "";
+    message.value = "";
+    await loadAnnouncements();
+    if (result) {
+      result.textContent = "Announcement sent to the Inbox.";
+      result.className = "admin-seat-refresh-result is-success";
+    }
+  } catch (error) {
+    if (result) {
+      result.textContent = safeErrorMessage(error, "Announcement could not be sent.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteAdminAnnouncement(messageId, button) {
+  if (!messageId || !button) return;
+  button.disabled = true;
+  try {
+    await fetchJson(`/api/admin/announcements/${encodeURIComponent(messageId)}`, {
+      method: "DELETE",
+      cache: "no-store",
+    }, { fallbackMessage: "Announcement could not be deleted.", allowDetail: true });
+    await loadAnnouncements();
+  } catch (error) {
+    button.disabled = false;
+    const result = document.querySelector("#admin-announcement-result");
+    if (result) {
+      result.textContent = safeErrorMessage(error, "Announcement could not be deleted.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  }
 }
 
 const scheduleStorageKey = "classcatalog_schedule_v1";
@@ -848,6 +1077,7 @@ function openScheduleDrawer() {
   const drawer = document.querySelector("#schedule-drawer");
   const nav = document.querySelector("#schedule-nav");
   if (!drawer) return;
+  if (state.inboxDrawerOpen) closeInboxDrawer();
   state.scheduleDrawerOpen = true;
   drawer.inert = false;
   drawer.classList.add("is-open");
@@ -2120,6 +2350,112 @@ function renderAdminProfessorOverrides(professors) {
   });
 }
 
+function renderAdminOperations(data) {
+  const operations = data?.operations || {};
+  const seats = data?.seat_refresh || {};
+  const professors = data?.professors || {};
+
+  const metrics = document.querySelector("#admin-operations-metrics");
+  if (metrics) {
+    const change = operations.section_count_change;
+    const hasChange = change != null && Number.isFinite(Number(change));
+    const changeLabel = hasChange
+      ? `${Number(change) > 0 ? "+" : ""}${adminNumber(change)}`
+      : "No prior snapshot";
+    metrics.innerHTML = [
+      adminMetric("Latest published scrape", operations.latest_published_at ? adminDate(operations.latest_published_at) : "Unavailable"),
+      adminMetric("Incomplete subjects", adminNumber(operations.incomplete_subjects || 0), { tone: operations.incomplete_subjects ? "bad" : "good" }),
+      adminMetric("Section-count change", changeLabel, { tone: Number(change) < 0 ? "warning" : "" }),
+      adminMetric("New subjects", adminNumber((operations.subjects_added || []).length), { tone: (operations.subjects_added || []).length ? "good" : "" }),
+      adminMetric("Removed subjects", adminNumber((operations.subjects_removed || []).length), { tone: (operations.subjects_removed || []).length ? "warning" : "good" }),
+      adminMetric("Stale seat records", adminNumber(seats.stale_cached_sections || 0), { tone: seats.stale_cached_sections ? "warning" : "good" }),
+      adminMetric("Professor matching failures", adminNumber(professors.unmatched || 0), { tone: professors.unmatched ? "warning" : "good" }),
+    ].join("");
+  }
+
+  const note = document.querySelector("#admin-operations-note");
+  if (note) {
+    const parts = [];
+    if (operations.incomplete_subjects_note) parts.push(operations.incomplete_subjects_note);
+    if (operations.previous_snapshot) parts.push(`Comparison snapshot: ${operations.previous_snapshot}`);
+    note.textContent = parts.join(" · ");
+  }
+
+  const termCoverage = document.querySelector("#admin-term-coverage");
+  if (termCoverage) {
+    termCoverage.replaceChildren();
+    (operations.term_coverage || []).forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "admin-ops-row";
+      const label = document.createElement("strong");
+      label.textContent = item.term || "Unknown term";
+      const value = document.createElement("span");
+      const hasDelta = item.change != null && Number.isFinite(Number(item.change));
+      const delta = hasDelta
+        ? ` · ${Number(item.change) >= 0 ? "+" : ""}${adminNumber(item.change)} vs previous snapshot`
+        : "";
+      value.textContent = `${adminNumber(item.sections)} sections${delta}`;
+      row.append(label, value);
+      termCoverage.appendChild(row);
+    });
+  }
+
+  const subjectChanges = document.querySelector("#admin-subject-changes");
+  if (subjectChanges) {
+    subjectChanges.replaceChildren();
+    const groups = [
+      ["New subjects", operations.subjects_added || [], "is-good"],
+      ["Removed subjects", operations.subjects_removed || [], "is-warning"],
+    ];
+    groups.forEach(([title, values, className]) => {
+      const group = document.createElement("div");
+      group.className = "admin-ops-change-group";
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      group.appendChild(heading);
+      if (!values.length) {
+        const none = document.createElement("span");
+        none.textContent = "None";
+        group.appendChild(none);
+      } else {
+        const chips = document.createElement("div");
+        chips.className = "admin-ops-chip-list";
+        values.forEach((value) => {
+          const chip = document.createElement("span");
+          chip.className = `admin-ops-chip ${className}`;
+          chip.textContent = value;
+          chips.appendChild(chip);
+        });
+        group.appendChild(chips);
+      }
+      subjectChanges.appendChild(group);
+    });
+  }
+
+  const failures = document.querySelector("#admin-professor-match-failures");
+  if (failures) {
+    failures.replaceChildren();
+    const unmatched = Array.isArray(professors.unmatched_instructors) ? professors.unmatched_instructors : [];
+    if (!unmatched.length) {
+      const allMatched = document.createElement("p");
+      allMatched.className = "admin-note";
+      allMatched.textContent = "No unmatched active instructors.";
+      failures.appendChild(allMatched);
+    } else {
+      unmatched.slice(0, 100).forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "admin-professor-failure-row";
+        const name = document.createElement("strong");
+        name.textContent = item.name || "Unknown instructor";
+        const courses = document.createElement("span");
+        courses.textContent = (item.course_codes || []).join(", ") || "No active course code";
+        row.append(name, courses);
+        failures.appendChild(row);
+      });
+    }
+  }
+}
+
 function renderAdminHealth(data) {
   state.adminHealth = data;
   const dashboard = document.querySelector("#admin-dashboard");
@@ -2133,6 +2469,9 @@ function renderAdminHealth(data) {
   if (statusText) statusText.textContent = passed ? "Coverage audit passed" : "Coverage audit failed";
   if (statusDot) statusDot.className = `admin-status-dot ${passed ? "is-good" : "is-bad"}`;
   if (checkedAt) checkedAt.textContent = `Checked ${adminDate(data?.checked_at)}`;
+
+  renderAdminOperations(data);
+  renderAdminAnnouncementHistory();
 
   const seats = data?.seat_refresh || {};
   const seatMetrics = document.querySelector("#admin-seat-metrics");
@@ -3459,6 +3798,8 @@ async function boot() {
   const adminProfessorOverrideForm = document.querySelector("#admin-professor-override-form");
   if (adminProfessorOverrideForm) adminProfessorOverrideForm.addEventListener("submit", saveAdminProfessorOverride);
   setupAdminProfessorPicker();
+  const adminAnnouncementForm = document.querySelector("#admin-announcement-form");
+  if (adminAnnouncementForm) adminAnnouncementForm.addEventListener("submit", sendAdminAnnouncement);
   const adminLoginForm = document.querySelector("#admin-login-form");
   if (adminLoginForm) adminLoginForm.addEventListener("submit", submitAdminLogin);
   const adminLogout = document.querySelector("#admin-logout");
@@ -3477,6 +3818,9 @@ async function boot() {
   ]);
   populateOptions(options);
   setupScheduleDrawer();
+  setupInboxDrawer();
+  await loadAnnouncements();
+  window.setInterval(loadAnnouncements, 60000);
   restoreCompletedCourses();
   renderCatalogStatus(catalogStatus);
   if (ratingsStatus) {
@@ -3543,4 +3887,14 @@ boot().catch((err) => {
   const error = document.querySelector("#error");
   error.textContent = safeErrorMessage(err, "ClassCatalog could not finish loading. Please try again.");
   error.hidden = false;
+});
+// Inbox drawer outside-click behavior v1
+document.addEventListener("click", (event) => {
+  if (!state.inboxDrawerOpen) return;
+
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  if (target.closest("#inbox-drawer") || target.closest("#inbox-nav")) return;
+  closeInboxDrawer();
 });
