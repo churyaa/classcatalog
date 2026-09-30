@@ -755,3 +755,97 @@ def test_recovery_rehydration_does_not_clear_failure_streak(
             context="third failed detail",
             error=PeopleSoftSessionError("third"),
         )
+
+
+def test_sparse_exact_subject_without_status_facet_can_continue() -> None:
+    """A closed/full-only subject may omit the Class Status and Subject facet UI."""
+
+    landing_url = "https://example.test/landing?Page=SSR_CLSRCH_MAIN_FL"
+    result_url = "https://example.test/results?SEARCH_TEXT=RWS&ES_STRM=2271"
+    sparse_exact = """
+    <html><body><form id='win0' name='win0' method='post'
+      action='/psc/CSDPRD/EMPLOYEE/SA/c/SSR_STUDENT_FL.SSR_CLSRCH_ES_FL.GBL'>
+      <input type='hidden' name='ICStateNum' value='1'>
+      <input type='hidden' name='ICAction' value='None'>
+      <input type='hidden' name='ICSID' value='x'>
+      <ul>
+        <li class='ps_grid-row psc_rowact'>
+          <p hidden>RWS 305W</p>
+          <h3 class='course-title'>Writing in Various Settings</h3>
+          <span>1 section</span>
+          <span>Closed</span>
+          <a href='/psc/CSDPRD/EMPLOYEE/SA/c/SSR_STUDENT_FL.SSR_CS_WRAP_FL.GBL?Page=SSR_CS_WRAP_FL&amp;CRSE_ID=012345&amp;CRSE_OFFER_NBR=1&amp;STRM=2271&amp;ACAD_CAREER=UGRD&amp;CLASS_NBR=12345'>View Details</a>
+        </li>
+      </ul>
+    </form></body></html>
+    """
+    fake = FakeSession(
+        [
+            _response(landing_url, _fixture("landing_terms.html")),
+            _response(result_url, sparse_exact),
+        ]
+    )
+    client = SdsuPeopleSoftSession(
+        SdsuHttpConfig(
+            landing_url="https://example.test/landing",
+            results_url="https://example.test/results",
+            delay_seconds=0,
+            max_retries=0,
+            in_run_state_recovery_attempts=0,
+        ),
+        http_session=fake,  # type: ignore[arg-type]
+    )
+
+    pages, result = client.scrape_subject(
+        term="Winter 2027",
+        term_code="2271",
+        subject="RWS",
+    )
+
+    assert result.complete
+    assert not result.exact_facet_applied
+    assert [course.course_code for course in result.courses] == ["RWS 305W"]
+    assert pages.filtered_html == sparse_exact
+    assert [method for method, _url, _kwargs in fake.requests] == ["GET", "GET"]
+
+
+def test_sparse_unrelated_subject_without_status_facet_still_fails_closed() -> None:
+    """Do not relax status proof for fuzzy searches that return another subject."""
+
+    landing_url = "https://example.test/landing?Page=SSR_CLSRCH_MAIN_FL"
+    result_url = "https://example.test/results?SEARCH_TEXT=RWS&ES_STRM=2271"
+    unrelated = """
+    <html><body><form id='win0'>
+      <ul>
+        <li class='ps_grid-row psc_rowact'>
+          <p hidden>COMM 103</p>
+          <h3 class='course-title'>Oral Communication</h3>
+          <span>1 section</span>
+          <a href='/psc/CSDPRD/EMPLOYEE/SA/c/SSR_STUDENT_FL.SSR_CS_WRAP_FL.GBL?CRSE_ID=1&amp;CRSE_OFFER_NBR=1&amp;STRM=2271&amp;ACAD_CAREER=UGRD&amp;CLASS_NBR=1'>View Details</a>
+        </li>
+      </ul>
+    </form></body></html>
+    """
+    fake = FakeSession(
+        [
+            _response(landing_url, _fixture("landing_terms.html")),
+            _response(result_url, unrelated),
+        ]
+    )
+    client = SdsuPeopleSoftSession(
+        SdsuHttpConfig(
+            landing_url="https://example.test/landing",
+            results_url="https://example.test/results",
+            delay_seconds=0,
+            max_retries=0,
+            in_run_state_recovery_attempts=0,
+        ),
+        http_session=fake,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(PeopleSoftSessionError, match="cannot safely prove"):
+        client.scrape_subject(
+            term="Winter 2027",
+            term_code="2271",
+            subject="RWS",
+        )

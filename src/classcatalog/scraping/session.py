@@ -643,11 +643,25 @@ class SdsuPeopleSoftSession:
         except OpenClassesFacetNotFound as exc:
             open_only_facet = None
             if not self._open_only_selected(initial_html):
-                raise PeopleSoftSessionError(
-                    "Could not find SDSU's Open Classes/open-only Class Status facet or "
-                    "a matching Selected Filters breadcrumb, so the scraper cannot "
-                    "safely prove that waitlisted/closed classes are included."
-                ) from exc
+                # Very sparse exact-subject result sets can omit both the Class Status
+                # fieldset and the Selected Filters breadcrumb. This occurs for terms
+                # where the requested subject has only a closed/full offering. If every
+                # visible result already belongs to the requested subject, the page is
+                # still safe to continue: downstream exact-subject handling will either
+                # apply the Subject facet when present or accept the exact-only rows.
+                #
+                # Keep fuzzy/unrelated result pages fail-closed. Those pages still need
+                # positive status-filter state before ClassCatalog can claim that closed
+                # and waitlisted classes were included.
+                exact_subject_only = bool(initial_hits) and all(
+                    hit.subject == subject for hit in initial_hits
+                )
+                if not exact_subject_only:
+                    raise PeopleSoftSessionError(
+                        "Could not find SDSU's Open Classes/open-only Class Status facet or "
+                        "a matching Selected Filters breadcrumb, so the scraper cannot "
+                        "safely prove that waitlisted/closed classes are included."
+                    ) from exc
 
         if open_only_facet is not None and open_only_facet.checked:
             open_only_post = build_open_classes_only_post(

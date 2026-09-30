@@ -71,7 +71,10 @@ from classcatalog.subjects import SUBJECT_ABBREVIATIONS, normalize_subject_input
 
 DEFAULT_RESULTS_DIRECTORY: Final[Path] = Path("results")
 DEFAULT_FIXTURE_DIRECTORY: Final[Path] = Path("fixtures/sdsu/live")
-CLASS_DETAIL_TAB_PROBES: Final[tuple[str, ...]] = ("CD", "MI", "CA", "TI")
+# Textbook/materials are not used by the current product, and probing the TI tab
+# costs an additional stateful PeopleSoft POST for every physical class. Keep
+# parser/model support for existing data, but skip that tab during deep scrapes.
+CLASS_DETAIL_TAB_PROBES: Final[tuple[str, ...]] = ("CD", "MI", "CA")
 
 
 @dataclass(frozen=True, slots=True)

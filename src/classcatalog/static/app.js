@@ -1671,6 +1671,25 @@ function currentAcademicTerm(terms, now = new Date()) {
   return terms[0] || "";
 }
 
+function preferredCampusForTerm(term, campusValues) {
+  const values = Array.isArray(campusValues) ? campusValues : [];
+  const preferred = /^Winter\s+\d{4}$/.test(String(term || "").trim())
+    ? "Global Campus"
+    : "San Diego Campus";
+  if (values.includes(preferred)) return preferred;
+  return values[0] || "";
+}
+
+function selectCampusForTerm(term) {
+  const inputs = [...document.querySelectorAll('input[name="campus"]')];
+  if (!inputs.length) return;
+  const preferred = preferredCampusForTerm(term, inputs.map((input) => input.value));
+  if (!preferred) return;
+  inputs.forEach((input) => {
+    input.checked = input.value === preferred;
+  });
+}
+
 function populateOptions(options) {
   state.options = options;
   const terms = Array.isArray(options.terms) ? options.terms : [];
@@ -1689,6 +1708,7 @@ function populateOptions(options) {
     button.addEventListener("click", () => {
       state.selectedTerm = term;
       [...termContainer.children].forEach((item) => item.setAttribute("aria-pressed", String(item.dataset.term === term)));
+      selectCampusForTerm(term);
       state.scheduleDetailKey = null;
       updateScheduleCount();
       syncScheduleButtons();
@@ -1732,15 +1752,19 @@ function populateOptions(options) {
   formats.replaceChildren();
   seatStatuses.replaceChildren();
 
-  const campusOptions = options.campuses?.length
-    ? options.campuses
-    : ["San Diego Campus", "Imperial Valley Campus"];
+  const campusOptions = [...new Set([
+    ...(options.campuses?.length
+      ? options.campuses
+      : ["San Diego Campus", "Imperial Valley Campus"]),
+    "Global Campus",
+  ])];
+  const preferredCampus = preferredCampusForTerm(state.selectedTerm, campusOptions);
   campusOptions.forEach((value) => checkbox(
     campuses,
     "campus",
     value,
     value,
-    { checked: value === "San Diego Campus" },
+    { checked: value === preferredCampus },
   ));
 
   if (options.requirements.length) {
@@ -3327,6 +3351,63 @@ function goToPage(page) {
   loadCourses({ page, scrollToResults: true });
 }
 
+function openPageJumpInput(ellipsis, currentPage, totalPages) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "page-jump-input";
+  input.inputMode = "numeric";
+  input.autocomplete = "off";
+  input.placeholder = "Page";
+  input.setAttribute("aria-label", `Go to page, 1 through ${totalPages}`);
+
+  const restoreEllipsis = () => {
+    if (input.isConnected) input.replaceWith(ellipsis);
+  };
+
+  const submitPageJump = () => {
+    const raw = input.value.trim();
+    const page = Number(raw);
+    const valid = /^\d+$/.test(raw)
+      && Number.isInteger(page)
+      && page >= 1
+      && page <= totalPages;
+
+    if (!valid) {
+      input.setCustomValidity(`Enter a page from 1 to ${totalPages}.`);
+      input.reportValidity();
+      input.focus();
+      input.select();
+      return;
+    }
+
+    input.setCustomValidity("");
+    if (page === currentPage) {
+      restoreEllipsis();
+      return;
+    }
+    goToPage(page);
+  };
+
+  input.addEventListener("input", () => input.setCustomValidity(""));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitPageJump();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      restoreEllipsis();
+      ellipsis.focus();
+    }
+  });
+  input.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      if (input.isConnected) restoreEllipsis();
+    }, 0);
+  });
+
+  ellipsis.replaceWith(input);
+  input.focus();
+}
 function renderPaginationView(view, data, firstShown, lastShown) {
   const pagination = document.querySelector(view.root);
   const pageControls = document.querySelector(view.controls);
@@ -3351,10 +3432,15 @@ function renderPaginationView(view, data, firstShown, lastShown) {
 
   paginationTokens(data.page, data.total_pages).forEach((token) => {
     if (token === "ellipsis") {
-      const ellipsis = document.createElement("span");
+      const ellipsis = document.createElement("button");
+      ellipsis.type = "button";
       ellipsis.className = "page-ellipsis";
-      ellipsis.textContent = "…";
-      ellipsis.setAttribute("aria-hidden", "true");
+      ellipsis.textContent = "\u2026";
+      ellipsis.setAttribute("aria-label", "Jump to a page");
+      ellipsis.title = "Jump to a page";
+      ellipsis.addEventListener("click", () => {
+        openPageJumpInput(ellipsis, data.page, data.total_pages);
+      });
       pageButtons.appendChild(ellipsis);
       return;
     }

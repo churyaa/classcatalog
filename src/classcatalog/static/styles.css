@@ -2848,3 +2848,43 @@ button:focus-visible {
   max-width: 340px;
   min-width: 0;
 }
+/* Clickable pagination ellipsis / direct page jump */
+.page-ellipsis {
+  min-width: 1.7rem;
+  min-height: 2.35rem;
+  padding: .35rem .3rem;
+  border: 0;
+  border-radius: .5rem;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  text-align: center;
+}
+.page-ellipsis:hover, .page-ellipsis:focus-visible {
+  color: var(--red);
+  background: rgba(166,25,46,.08);
+  outline: none;
+}
+.page-jump-input {
+  width: 4rem;
+  min-height: 2.35rem;
+  padding: .42rem .45rem;
+  border: 1px solid var(--red);
+  border-radius: .55rem;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 800;
+  text-align: center;
+}
+.page-jump-input:focus {
+  outline: 2px solid rgba(166,25,46,.18);
+  outline-offset: 1px;
+}
+.pagination-top .page-ellipsis,
+.pagination-top .page-jump-input {
+  min-height: 2rem;
+}

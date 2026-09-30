@@ -20,6 +20,20 @@ def test_top_and_bottom_pagination_controls_are_present() -> None:
     assert 'id="next-page"' in html
 
 
+def test_pagination_ellipsis_opens_page_jump_input() -> None:
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert "function openPageJumpInput(ellipsis, currentPage, totalPages)" in javascript
+    assert 'ellipsis.setAttribute("aria-label", "Jump to a page")' in javascript
+    assert "openPageJumpInput(ellipsis, data.page, data.total_pages);" in javascript
+    assert 'input.className = "page-jump-input";' in javascript
+    assert 'input.inputMode = "numeric";' in javascript
+    assert 'if (event.key === "Enter")' in javascript
+    assert 'else if (event.key === "Escape")' in javascript
+    assert ".page-ellipsis:hover" in css
+    assert ".page-jump-input {" in css
+
 def test_course_cards_render_seat_occupancy_and_description_tooltips() -> None:
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "function seatSummary(section)" in javascript
@@ -105,8 +119,8 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "Computer Science, B.S." not in javascript
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
-    assert "styles.css?v=60" in html
-    assert "app.js?v=62" in html
+    assert "styles.css?v=61" in html
+    assert "app.js?v=64" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -149,7 +163,15 @@ def test_location_filter_and_component_layout_are_present() -> None:
 
     assert html.index('<summary>Location</summary>') < html.index('<summary>Seat availability</summary>')
     assert 'id="campuses"' in html
-    assert '{ checked: value === "San Diego Campus" }' in javascript
+    assert '"Global Campus"' in javascript
+    assert "function preferredCampusForTerm(term, campusValues)" in javascript
+    assert r'const preferred = /^Winter\s+\d{4}$/.test' in javascript
+    assert '? "Global Campus"' in javascript
+    assert ': "San Diego Campus";' in javascript
+    assert "function selectCampusForTerm(term)" in javascript
+    assert "selectCampusForTerm(term);" in javascript
+    assert "const preferredCampus = preferredCampusForTerm(state.selectedTerm, campusOptions);" in javascript
+    assert "{ checked: value === preferredCampus }" in javascript
     assert 'addRepeated(params, "campus", checkedValues("campus"))' in javascript
     assert 'function meetingLocationText(meetings, fallbackLocation = null)' in javascript
     assert 'function componentRows(section)' in javascript
@@ -189,7 +211,7 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "persistCompletedCourses(hidden.value);" in javascript
     assert 'persistCompletedCourses("");' in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=62" in html
+    assert "app.js?v=64" in html
 
 
 def test_theme_persists_in_first_party_cookie() -> None:
@@ -247,8 +269,8 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.good" in css
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
-    assert "styles.css?v=60" in html
-    assert "app.js?v=62" in html
+    assert "styles.css?v=61" in html
+    assert "app.js?v=64" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -385,8 +407,8 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-metric-grid' in css
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
-    assert 'styles.css?v=60' in html
-    assert 'app.js?v=62' in html
+    assert 'styles.css?v=61' in html
+    assert 'app.js?v=64' in html
 
 
 def test_admin_can_manage_manual_professor_matches() -> None:
@@ -467,8 +489,8 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-table" in css
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
-    assert "styles.css?v=60" in html
-    assert "app.js?v=62" in html
+    assert "styles.css?v=61" in html
+    assert "app.js?v=64" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:
@@ -537,7 +559,7 @@ def test_term_selector_defaults_to_current_semester_without_all_terms() -> None:
     assert 'const allTerms = ["", ...options.terms];' not in javascript
     assert 'button.textContent = term || "All terms";' not in javascript
     assert 'button.textContent = term;' in javascript
-    assert "app.js?v=62" in html
+    assert "app.js?v=64" in html
 
 
 
