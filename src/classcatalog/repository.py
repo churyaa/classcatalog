@@ -307,7 +307,23 @@ class CourseRepository:
         requirements = {tag for item in self._sections for tag in item.requirement_tags}
         requirements.update(self._catalog.requirement_labels)
         classifications.update(self._catalog.classifications)
-        campuses = ("San Diego Campus", "Imperial Valley Campus")
+        campus_values = {
+            normalize_campus(item.campus)
+            for item in self._sections
+            if item.campus and item.campus.strip()
+        }
+        preferred_campus_order = (
+            "San Diego Campus",
+            "Imperial Valley Campus",
+            "Global Campus",
+        )
+        campuses = tuple(
+            campus
+            for campus in preferred_campus_order
+            if campus in campus_values
+        ) + tuple(
+            sorted(campus_values.difference(preferred_campus_order))
+        )
         course_titles: dict[str, str] = {}
         for item in self._sections:
             code = (item.course_code or "").strip().upper()

@@ -214,7 +214,11 @@ def test_location_options_and_campus_query_are_exposed_by_api() -> None:
     options = client.get("/api/options").json()
     response = client.get("/api/classes", params={"campus": "San Diego Campus"})
 
-    assert options["campuses"] == ["San Diego Campus", "Imperial Valley Campus"]
+    assert options["campuses"] == [
+        "San Diego Campus",
+        "Global Campus",
+    ]
+    assert "San Diego" not in options["campuses"]
     assert response.status_code == 200
     assert response.json()["filtered_total"] > 0
     assert all(item["campus"] == "San Diego Campus" for item in response.json()["items"])
