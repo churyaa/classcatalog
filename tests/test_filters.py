@@ -284,9 +284,30 @@ def test_included_and_excluded_days_are_combined() -> None:
     assert [item.id for item in results.items] == ["monday-only"]
 
 
-def test_search_can_match_course_description() -> None:
-    results = repository.search(SearchFilters(query="computational problem solving"))
-    assert [item.course_code for item in results.items] == ["CS 150"]
+def test_search_does_not_match_course_description() -> None:
+    template = repository.sections[0]
+    section = template.model_copy(
+        update={
+            "id": "description-only-search-hit",
+            "course_code": "A E 280",
+            "subject": "A E",
+            "catalog_number": "280",
+            "title": "Methods of Analysis",
+            "description": "Applications of linear algebra to engineering systems.",
+            "instructor": "Example Instructor",
+        }
+    )
+    custom_repository = CourseRepository((section,))
+
+    description_only = custom_repository.search(SearchFilters(query="linear algebra"))
+    title_match = custom_repository.search(SearchFilters(query="Methods of Analysis"))
+    instructor_match = custom_repository.search(SearchFilters(query="Example Instructor"))
+    course_match = custom_repository.search(SearchFilters(query="A E 280"))
+
+    assert description_only.filtered_total == 0
+    assert [item.id for item in title_match.items] == ["description-only-search-hit"]
+    assert [item.id for item in instructor_match.items] == ["description-only-search-hit"]
+    assert [item.id for item in course_match.items] == ["description-only-search-hit"]
 
 
 def test_variable_unit_filter_uses_range_overlap() -> None:

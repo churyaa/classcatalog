@@ -9,6 +9,18 @@ STATIC = ROOT / "src" / "classcatalog" / "static"
 SAMPLE_DATA = ROOT / "src" / "classcatalog" / "data" / "sample_sections.json"
 
 
+def test_static_html_has_no_mojibake_markers() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    assert "\u00e2" not in html
+    assert "\u00c2" not in html
+    assert "\ufffd" not in html
+    assert "Updating results&hellip;" in html
+    assert "Checking&hellip;" in html
+    assert "&mdash;" in html
+    assert "professor&rsquo;s" in html
+    assert "background &middot; accent &middot; text &middot; UI" in html
+
 def test_top_and_bottom_pagination_controls_are_present() -> None:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert 'id="top-pagination"' in html

@@ -144,7 +144,6 @@ def matches(section: CourseSection, filters: SearchFilters) -> bool:
                 for value in (
                     section.course_code,
                     section.title,
-                    section.description or "",
                     section.instructor or "",
                 )
                 if value
