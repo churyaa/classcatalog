@@ -17,7 +17,7 @@ from classcatalog.scraping.class_detail import (
     merge_class_information_records,
     parse_class_information_page,
 )
-from classcatalog.scraping.class_post import find_class_number_actions
+from classcatalog.scraping.class_post import find_class_number_action_occurrences
 from classcatalog.scraping.constants import (
     DEFAULT_DELAY_SECONDS,
     DEFAULT_IN_RUN_STATE_RECOVERY_ATTEMPTS,
@@ -650,6 +650,7 @@ def _save_detail_fixtures(
             )
 
         if parsed is not None and not parsed.options_complete:
+            class_action_occurrences = ()
             class_actions = ()
             logger.info(
                 "class_detail_skipped_incomplete_option_grid",
@@ -659,10 +660,17 @@ def _save_detail_fixtures(
             )
         else:
             try:
-                class_actions = find_class_number_actions(pages.course_info_html)
+                class_action_occurrences = find_class_number_action_occurrences(
+                    pages.course_info_html
+                )
+                unique_class_actions = {}
+                for action in class_action_occurrences:
+                    unique_class_actions.setdefault(action.class_number, action)
+                class_actions = tuple(unique_class_actions.values())
             except Exception as exc:  # noqa: BLE001 - retain higher-level fixtures
                 if is_recoverable_people_soft_state_error(exc):
                     raise
+                class_action_occurrences = ()
                 class_actions = ()
                 detail_warning(
                     "class_action_parse_failed",
@@ -880,7 +888,7 @@ def _save_detail_fixtures(
                     action.component,
                     action.source_row_index,
                 )
-                for action in class_actions
+                for action in class_action_occurrences
             )
             ordered_sections, fallback_class_numbers = ensure_all_course_option_sections(
                 parsed,

@@ -556,6 +556,70 @@ def test_recovery_preserves_many_to_many_enrollment_option_memberships(tmp_path:
     assert recovered.primary_group_ids["3212"] == ("3212+9001", "3212+9002")
 
 
+def test_recovery_preserves_repeated_secondary_component_across_option_rows(
+    tmp_path: Path,
+) -> None:
+    output = _subject_output()
+    detail = output.course_details[0]
+    section = detail.sections[0]
+
+    fixture = (
+        Path(__file__).parent / "fixtures" / "sdsu" / "detail-3213-course-info.html"
+    ).read_text(encoding="utf-8")
+    fixture = fixture.replace(
+        'id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$0">Lrg Lect - 3212</a>',
+        'id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$0">Laboratory - 9001</a>'
+        '<br><a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_2$295$$0">Discussion - 3212</a>',
+        1,
+    )
+    fixture = fixture.replace(
+        'id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$1">Lrg Lect - 3213</a>',
+        'id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$1">Laboratory - 9002</a>'
+        '<br><a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_2$295$$1">Discussion - 3212</a>',
+        1,
+    )
+    course_html = tmp_path / "detail-me340-course-info.html"
+    course_html.write_text(fixture, encoding="utf-8")
+
+    discussion = section.model_copy(
+        update={
+            "class_number": "3212",
+            "component": "Discussion",
+            "option_number": None,
+            "option_group_indices": (),
+            "option_primary_group_indices": (),
+        }
+    )
+    lab_one = section.model_copy(
+        update={
+            "class_number": "9001",
+            "component": "Laboratory",
+            "option_number": None,
+            "option_group_indices": (),
+            "option_primary_group_indices": (),
+        }
+    )
+    lab_two = lab_one.model_copy(update={"class_number": "9002"})
+    legacy_detail = detail.model_copy(
+        update={
+            "sections": (lab_one, discussion, lab_two),
+            "fixture_paths": (str(course_html),),
+        }
+    )
+
+    recovered = _recovered_option_data(legacy_detail)
+
+    assert recovered.group_indices["3212"] == (1, 2)
+    assert recovered.group_indices["9001"] == (1,)
+    assert recovered.group_indices["9002"] == (2,)
+    assert recovered.group_ids["3212"] == ("3212+9001", "3212+9002")
+    assert recovered.group_ids["9001"] == ("3212+9001",)
+    assert recovered.group_ids["9002"] == ("3212+9002",)
+    assert recovered.primary_group_ids["9001"] == ("3212+9001",)
+    assert recovered.primary_group_ids["9002"] == ("3212+9002",)
+    assert recovered.primary_group_ids.get("3212", ()) == ()
+
+
 def test_recovery_runs_for_single_secondary_component_detail(tmp_path: Path) -> None:
     output = _subject_output()
     detail = output.course_details[0]

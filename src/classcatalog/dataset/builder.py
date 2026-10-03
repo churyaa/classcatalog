@@ -32,7 +32,7 @@ from classcatalog.dataset.models import (
 from classcatalog.models import CourseSection, InstructionMode, Meeting
 from classcatalog.instruction_modes import classify_sdsu_instruction_mode
 from classcatalog.repository import CourseRepository
-from classcatalog.scraping.class_post import find_class_number_actions
+from classcatalog.scraping.class_post import find_class_number_action_occurrences
 from classcatalog.scraping.models import (
     CourseDetailOutput,
     CourseInfoRecord,
@@ -828,7 +828,7 @@ def _recovered_option_data(detail: CourseDetailOutput) -> _RecoveredOptionData:
                 else detail.course.detail_url or 'https://catalog.sdsu.edu/'
             ),
         )
-        actions = find_class_number_actions(html)
+        actions = find_class_number_action_occurrences(html)
     except (OSError, ValueError):
         return _RecoveredOptionData(option_numbers={}, group_indices={}, primary_group_indices={}, group_ids={}, primary_group_ids={})
 

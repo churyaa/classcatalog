@@ -770,11 +770,14 @@ def ensure_all_course_option_sections(
     """Return one section record for every unique physical class discovered.
 
     Course Information rows represent *enrollment options*, not necessarily physical
-    sections.  A lecture+lab course can repeat one lecture class across many option
-    rows while pairing it with a different lab each time.  ``expected_classes`` is a
-    canonical, already-deduplicated sequence of ``(class_number, component, row)``
-    tuples discovered from all clickable component links.  When it is unavailable,
-    the primary class numbers from ``course.options`` remain the fallback source.
+    sections.  A lecture+lab course can repeat one physical class across many option
+    rows while pairing it with a different component each time.  ``expected_classes``
+    is the canonical row-level sequence of ``(class_number, component, row)`` tuples
+    discovered from all clickable component links; repeated physical class numbers are
+    intentional because they preserve many-to-many option membership.  The returned
+    section list is still deduplicated by physical class number.  When row-level data
+    is unavailable, the primary class numbers from ``course.options`` remain the
+    fallback source.
     """
 
     by_class = {section.class_number: section for section in sections}

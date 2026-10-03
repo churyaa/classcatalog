@@ -131,7 +131,7 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "Computer Science, B.S." not in javascript
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
-    assert "styles.css?v=61" in html
+    assert "styles.css?v=62" in html
     assert "app.js?v=64" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
@@ -281,7 +281,7 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.good" in css
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
-    assert "styles.css?v=61" in html
+    assert "styles.css?v=62" in html
     assert "app.js?v=64" in html
 
 
@@ -388,6 +388,10 @@ def test_favorites_navigation_star_and_persistence_are_present() -> None:
     assert '.course-favorite.is-favorite .favorite-star-icon path' in css
     assert 'fill: #f4c542;' in css
     assert '.header-nav-button' in css
+    assert ".course-code-wrap {" in css
+    assert "flex: 0 0 auto;" in css
+    assert "min-width: 6.8rem;" in css
+    assert ".course-top > :last-child { min-width: 0; }" in css
 
 
 def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None:
@@ -419,7 +423,7 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-metric-grid' in css
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
-    assert 'styles.css?v=61' in html
+    assert 'styles.css?v=62' in html
     assert 'app.js?v=64' in html
 
 
@@ -501,7 +505,7 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-table" in css
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
-    assert "styles.css?v=61" in html
+    assert "styles.css?v=62" in html
     assert "app.js?v=64" in html
 
 

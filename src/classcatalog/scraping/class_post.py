@@ -106,17 +106,17 @@ def _replace_field(fields: list[tuple[str, str]], name: str, value: str) -> None
     fields[:] = output
 
 
-def find_class_number_actions(html: str) -> tuple[ClassNumberAction, ...]:
-    """Find the dynamic PeopleSoft actions behind each clickable class number.
+def find_class_number_action_occurrences(html: str) -> tuple[ClassNumberAction, ...]:
+    """Find every row-level PeopleSoft class-number action.
 
-    The numeric fragments inside the action ID are implementation details and may
-    change between page loads.  Callers should locate actions by class number on
-    every fresh course-information page rather than persisting an action ID.
+    A physical class can legitimately appear in multiple enrollment-option rows.
+    Preserve every occurrence here so option-topology recovery can attach a shared
+    lecture, discussion, lab, activity, or other component to every row where SDSU
+    actually lists it.
     """
 
     soup = BeautifulSoup(html, "html.parser")
     actions: list[ClassNumberAction] = []
-    seen: set[str] = set()
 
     for link in soup.find_all("a"):
         if not isinstance(link, Tag):
@@ -132,23 +132,11 @@ def find_class_number_actions(html: str) -> tuple[ClassNumberAction, ...]:
         text_match = _CLASS_TEXT_RE.fullmatch(text)
         if text_match is None:
             continue
-        class_number = text_match.group("class_number")
-        component = normalize_space(text_match.group("component")) or None
-
-        # A single physical class can legitimately appear in many enrollment options.
-        # CHEM 100, for example, repeats the same lecture class next to dozens of
-        # different laboratory choices, giving that lecture a different PeopleSoft
-        # action ID in every row.  The action still opens the same class modal, so use
-        # the first occurrence of each physical class number instead of treating the
-        # repeated dynamic action IDs as an ambiguity.
-        if class_number in seen:
-            continue
-        seen.add(class_number)
         actions.append(
             ClassNumberAction(
-                class_number=class_number,
+                class_number=text_match.group("class_number"),
                 action_id=action_id,
-                component=component,
+                component=normalize_space(text_match.group("component")) or None,
                 source_row_index=int(id_match.group("row")),
                 component_index=int(id_match.group("component_index")),
             )
@@ -160,6 +148,24 @@ def find_class_number_actions(html: str) -> tuple[ClassNumberAction, ...]:
             key=lambda action: (action.source_row_index, action.component_index),
         )
     )
+
+
+def find_class_number_actions(html: str) -> tuple[ClassNumberAction, ...]:
+    """Find one dynamic PeopleSoft action per unique physical class number.
+
+    Network callers only need one modal-opening action for each physical class.  Keep
+    the first row occurrence while the row-preserving helper above remains available
+    to enrollment-option grouping code.
+    """
+
+    actions: list[ClassNumberAction] = []
+    seen: set[str] = set()
+    for action in find_class_number_action_occurrences(html):
+        if action.class_number in seen:
+            continue
+        seen.add(action.class_number)
+        actions.append(action)
+    return tuple(actions)
 
 
 def find_class_number_action(html: str, class_number: str) -> ClassNumberAction:

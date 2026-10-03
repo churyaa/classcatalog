@@ -11,6 +11,7 @@ from classcatalog.scraping.class_post import (
     ClassNumberActionNotFound,
     build_class_number_post,
     find_class_number_action,
+    find_class_number_action_occurrences,
     find_class_number_actions,
 )
 from classcatalog.scraping.session import SdsuHttpConfig, SdsuPeopleSoftSession
@@ -177,3 +178,32 @@ def test_deduplicates_repeated_lecture_actions_and_keeps_linked_labs() -> None:
     assert actions[1].component == "Laboratory"
     assert actions[1].component_index == 2
     assert actions[2].source_row_index == 1
+
+def test_preserves_repeated_secondary_actions_for_enrollment_membership() -> None:
+    html = """
+    <html><body>
+      <a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$0">Laboratory - 9001</a>
+      <a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_2$295$$0">Discussion - 3212</a>
+      <a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$1">Laboratory - 9002</a>
+      <a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_2$295$$1">Discussion - 3212</a>
+    </body></html>
+    """
+
+    occurrences = find_class_number_action_occurrences(html)
+
+    assert [
+        (action.class_number, action.source_row_index, action.component_index)
+        for action in occurrences
+    ] == [
+        ("9001", 0, 1),
+        ("3212", 0, 2),
+        ("9002", 1, 1),
+        ("3212", 1, 2),
+    ]
+
+    # Modal fetching still probes each physical class only once.
+    assert [action.class_number for action in find_class_number_actions(html)] == [
+        "9001",
+        "3212",
+        "9002",
+    ]
