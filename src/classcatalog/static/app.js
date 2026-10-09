@@ -337,6 +337,8 @@ const majorProgramCookieName = "classcatalog_major_program";
 const majorProgramCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 const completedCoursesCookieName = "classcatalog_completed_courses";
 const completedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
+const hideCompletedCoursesCookieName = "classcatalog_hide_completed_courses";
+const hideCompletedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 const favoritesStorageKey = "classcatalog_favorites_v1";
 
 function readFavorites() {
@@ -1250,6 +1252,25 @@ function persistCompletedCourses(value) {
   writeCookie(completedCoursesCookieName, "", 0);
 }
 
+function savedHideCompletedCourses() {
+  const saved = readCookie(hideCompletedCoursesCookieName);
+  return saved ? saved !== "0" : true;
+}
+
+function persistHideCompletedCourses(hidden) {
+  writeCookie(
+    hideCompletedCoursesCookieName,
+    hidden ? "1" : "0",
+    hideCompletedCoursesCookieMaxAgeSeconds,
+  );
+}
+
+function restoreHideCompletedCourses() {
+  const checkbox = document.querySelector("#hide-completed-courses");
+  if (!checkbox) return;
+  checkbox.checked = savedHideCompletedCourses();
+}
+
 function normalizeCourseCode(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
 }
@@ -1588,7 +1609,9 @@ function buildParams(page = state.page) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  addRepeated(params, "completed_course", completed);
+  if (document.querySelector("#hide-completed-courses").checked) {
+    addRepeated(params, "completed_course", completed);
+  }
 
   addRepeated(params, "day", dayValues("include"));
   addRepeated(params, "exclude_day", dayValues("exclude"));
@@ -3653,9 +3676,9 @@ function removeActiveFilter(key, value) {
   } else if (key === "major_only") {
     document.querySelector("#major-only").checked = false;
   } else if (key === "completed_course") {
-    setCompletedCourseValues([], { refresh: false });
-    closeCompletedCourseSuggestions();
-    profileChanged = true;
+    const hideCompleted = document.querySelector("#hide-completed-courses");
+    if (hideCompleted) hideCompleted.checked = false;
+    persistHideCompletedCourses(false);
   } else if (key === "day" || key === "exclude_day") {
     const button = [...document.querySelectorAll("#days .day-toggle")]
       .find((item) => item.dataset.day === value);
@@ -3985,10 +4008,9 @@ function clearFilters() {
   });
   const defaultCampus = document.querySelector('input[name="campus"][value="San Diego Campus"]');
   if (defaultCampus) defaultCampus.checked = true;
-  document.querySelectorAll('.filters input:not([type="checkbox"]), .filters select').forEach((control) => { control.value = ""; });
+  document.querySelectorAll('.filters input:not([type="checkbox"]):not(#completed-courses), .filters select').forEach((control) => { control.value = ""; });
   persistMajorProgram("");
-  persistCompletedCourses("");
-  renderCompletedCourseChips();
+  persistHideCompletedCourses(false);
   closeCompletedCourseSuggestions();
   syncClassificationAvailability();
   hideProgramSummary();
@@ -4041,6 +4063,7 @@ async function boot() {
   await loadAnnouncements();
   window.setInterval(loadAnnouncements, 60000);
   restoreCompletedCourses();
+  restoreHideCompletedCourses();
   renderCatalogStatus(catalogStatus);
   if (ratingsStatus) {
     setServiceMessage(
@@ -4055,6 +4078,12 @@ async function boot() {
     const eventName = control.type === "search" || control.type === "text" || control.type === "number" ? "input" : "change";
     control.addEventListener(eventName, scheduleLoad);
   });
+  const hideCompletedCourses = document.querySelector("#hide-completed-courses");
+  if (hideCompletedCourses) {
+    hideCompletedCourses.addEventListener("change", () => {
+      persistHideCompletedCourses(hideCompletedCourses.checked);
+    });
+  }
   document.querySelector("#clear-filters").addEventListener("click", clearFilters);
   document.querySelector("#program").addEventListener("change", () => {
     const selectedProgram = document.querySelector("#program").value;

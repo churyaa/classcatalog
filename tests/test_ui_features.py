@@ -123,6 +123,9 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "fetchJson(\"/api/catalog/status\")" in javascript
     assert "fetchJson(`/api/profile/summary?${params.toString()}`" in javascript
     assert "function syncClassificationAvailability()" in javascript
+    assert 'id="hide-completed-courses"' in html
+    assert "Hide completed courses from searches" in html
+    assert html.index('id="hide-completed-courses"') < html.index('id="major-only"')
     assert 'id="major-only"' in html
     assert "Show only courses related to major" in html
     assert 'id="eligible-only"' not in html
@@ -132,7 +135,7 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=65" in html
+    assert "app.js?v=66" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -211,6 +214,8 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "const majorProgramCookieMaxAgeSeconds = 60 * 60 * 24 * 365;" in javascript
     assert 'const completedCoursesCookieName = "classcatalog_completed_courses";' in javascript
     assert "const completedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;" in javascript
+    assert 'const hideCompletedCoursesCookieName = "classcatalog_hide_completed_courses";' in javascript
+    assert "const hideCompletedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;" in javascript
     assert "document.cookie" in javascript
     assert "SameSite=Lax" in javascript
     assert "Path=/" in javascript
@@ -221,9 +226,11 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert 'persistMajorProgram("");' in javascript
     assert "restoreCompletedCourses();" in javascript
     assert "persistCompletedCourses(hidden.value);" in javascript
-    assert 'persistCompletedCourses("");' in javascript
+    assert 'persistCompletedCourses("");' not in javascript
+    assert "restoreHideCompletedCourses();" in javascript
+    assert "persistHideCompletedCourses(hideCompletedCourses.checked);" in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=65" in html
+    assert "app.js?v=66" in html
 
 
 def test_theme_persists_in_first_party_cookie() -> None:
@@ -282,7 +289,7 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=65" in html
+    assert "app.js?v=66" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -319,7 +326,12 @@ def test_active_filter_chips_can_remove_their_filters_except_term() -> None:
     assert 'remove.className = "filter-chip-remove";' in javascript
     assert 'remove.addEventListener("click", () => removeActiveFilter(key, value));' in javascript
     assert 'if (key === "major_only" && value === "false") return;' in javascript
-    assert 'setCompletedCourseValues([], { refresh: false });' in javascript
+    remove_start = javascript.index("function removeActiveFilter(key, value)")
+    remove_end = javascript.index("function appendActiveFilterChip", remove_start)
+    remove_filter = javascript[remove_start:remove_end]
+    assert 'document.querySelector("#hide-completed-courses")' in remove_filter
+    assert "persistHideCompletedCourses(false);" in remove_filter
+    assert "setCompletedCourseValues" not in remove_filter
     assert 'if (key === "term") {' in javascript
     assert 'appendActiveFilterChip(container, `term: ${value}`, key, value, { removable: false });' in javascript
     assert 'state.selectedTerm = "";' not in javascript
@@ -328,6 +340,22 @@ def test_active_filter_chips_can_remove_their_filters_except_term() -> None:
     assert "background: #c62828;" in css
     assert "filters=5" in html
     assert "filters=4" in html
+
+
+def test_completed_course_search_visibility_is_toggleable_without_deleting_profile_data() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="hide-completed-courses" type="checkbox" checked' in html
+    assert 'if (document.querySelector("#hide-completed-courses").checked) {' in javascript
+    assert 'addRepeated(params, "completed_course", completed);' in javascript
+    assert 'completedCourseValues().forEach((course) => params.append("completed_course", course));' in javascript
+    clear_start = javascript.index("function clearFilters()")
+    clear_end = javascript.index("async function boot()", clear_start)
+    clear_filters = javascript[clear_start:clear_end]
+    assert ':not(#completed-courses)' in clear_filters
+    assert 'persistCompletedCourses("");' not in clear_filters
+    assert "persistHideCompletedCourses(false);" in clear_filters
 
 
 def test_completed_courses_use_autocomplete_picker() -> None:
@@ -424,7 +452,7 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
     assert 'styles.css?v=62' in html
-    assert 'app.js?v=65' in html
+    assert 'app.js?v=66' in html
 
 
 def test_admin_can_manage_manual_professor_matches() -> None:
@@ -518,7 +546,7 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=65" in html
+    assert "app.js?v=66" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:
@@ -587,7 +615,7 @@ def test_term_selector_defaults_to_current_semester_without_all_terms() -> None:
     assert 'const allTerms = ["", ...options.terms];' not in javascript
     assert 'button.textContent = term || "All terms";' not in javascript
     assert 'button.textContent = term;' in javascript
-    assert "app.js?v=65" in html
+    assert "app.js?v=66" in html
 
 
 
