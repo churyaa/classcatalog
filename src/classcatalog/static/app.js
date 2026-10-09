@@ -15,6 +15,7 @@ const state = {
   adminSeatCourseSuggestionIndex: -1,
   adminProfessorSuggestions: [],
   adminProfessorSuggestionIndex: -1,
+  adminProfessorRefreshPollTimer: null,
   adminHealth: null,
   adminEnabled: false,
   adminAuthenticated: false,
@@ -2318,8 +2319,10 @@ function renderAdminProfessorOverrides(professors) {
     badge.className = `admin-health-badge ${overrides.length ? "is-good" : ""}`;
   }
 
+  const refreshRunning = Boolean(professors.refresh?.running);
   const available = Boolean(professors.manual_matching_enabled)
-    && !professors.manual_matching_error;
+    && !professors.manual_matching_error
+    && !refreshRunning;
   const instructorInput = document.querySelector("#admin-professor-instructor-input");
   const profileInput = document.querySelector("#admin-professor-profile-input");
   const saveButton = document.querySelector("#admin-professor-override-save");
@@ -2327,7 +2330,7 @@ function renderAdminProfessorOverrides(professors) {
     if (control) control.disabled = !available;
   });
   const result = document.querySelector("#admin-professor-override-result");
-  if (!available && result) {
+  if (!available && !refreshRunning && result) {
     result.textContent = professors.manual_matching_error
       ? "The professor ratings cache could not be read safely."
       : "Configure the professor ratings cache before adding manual matches.";
@@ -2635,6 +2638,54 @@ function renderAdminHealth(data) {
       ? `Last sync ${adminDate(sync.generated_at)} · ${adminNumber(sync.matched)} matched · ${adminNumber(sync.unmatched)} unmatched · ${adminNumber(sync.errors)} errors`
       : "No RateMyProfessors sync metadata available.";
   }
+  const ratingsRefresh = professors.refresh || {};
+  const activeInstructors = Array.isArray(professors.active_instructors)
+    ? professors.active_instructors
+    : [];
+  const refreshOptions = document.querySelector("#admin-professor-refresh-options");
+  if (refreshOptions) {
+    refreshOptions.innerHTML = activeInstructors
+      .map((item) => `<option value="${escapeHtml(item.name || "")}">${escapeHtml((item.course_codes || []).join(", "))}</option>`)
+      .join("");
+  }
+  const refreshAllButton = document.querySelector("#admin-professor-refresh-all");
+  const refreshOneInput = document.querySelector("#admin-professor-refresh-input");
+  const refreshOneButton = document.querySelector("#admin-professor-refresh-one");
+  const refreshUnavailable = !ratingsRefresh.enabled || ratingsRefresh.running;
+  if (refreshAllButton) refreshAllButton.disabled = refreshUnavailable;
+  if (refreshOneInput) refreshOneInput.disabled = refreshUnavailable;
+  if (refreshOneButton) refreshOneButton.disabled = refreshUnavailable;
+
+  const refreshStatus = document.querySelector("#admin-professor-refresh-status");
+  if (refreshStatus) {
+    if (ratingsRefresh.running) {
+      const target = ratingsRefresh.scope === "one" && ratingsRefresh.instructor_name
+        ? ratingsRefresh.instructor_name
+        : "all active instructors";
+      refreshStatus.textContent = `RateMyProfessors refresh is running for ${target}. Started ${adminDate(ratingsRefresh.started_at)}.`;
+    } else if (ratingsRefresh.last_error) {
+      refreshStatus.textContent = `Last RateMyProfessors refresh failed: ${ratingsRefresh.last_error}`;
+    } else if (ratingsRefresh.completed_at) {
+      const partial = Number(ratingsRefresh.last_exit_code) !== 0;
+      const changed = adminNumber(ratingsRefresh.updated_section_listings || 0);
+      refreshStatus.textContent = partial
+        ? `Last refresh completed with source errors ${adminDate(ratingsRefresh.completed_at)}. ${changed} section listings were reloaded.`
+        : `Last refresh completed ${adminDate(ratingsRefresh.completed_at)}. ${changed} section listings were reloaded.`;
+    } else {
+      refreshStatus.textContent = ratingsRefresh.enabled
+        ? "No Admin-triggered RateMyProfessors refresh has run since this server started."
+        : "RateMyProfessors refresh is not configured.";
+    }
+  }
+  if (ratingsRefresh.running && !state.adminProfessorRefreshPollTimer) {
+    state.adminProfessorRefreshPollTimer = window.setTimeout(async () => {
+      state.adminProfessorRefreshPollTimer = null;
+      if (state.adminAuthenticated && window.location.hash === "#admin") await loadAdminHealth();
+    }, 1500);
+  } else if (!ratingsRefresh.running && state.adminProfessorRefreshPollTimer) {
+    window.clearTimeout(state.adminProfessorRefreshPollTimer);
+    state.adminProfessorRefreshPollTimer = null;
+  }
   renderAdminProfessorOverrides(professors);
 
   const completeness = data?.completeness || {};
@@ -2744,6 +2795,84 @@ async function refreshTbaProfessorsNow() {
     }
   } finally {
     button.disabled = false;
+  }
+}
+
+async function refreshAllProfessorRatings() {
+  const button = document.querySelector("#admin-professor-refresh-all");
+  const result = document.querySelector("#admin-professor-refresh-result");
+  if (!button) return;
+  button.disabled = true;
+  if (result) {
+    result.textContent = "Starting a full RateMyProfessors refresh...";
+    result.className = "admin-seat-refresh-result";
+  }
+  try {
+    await fetchJson("/api/admin/professors/refresh", {
+      method: "POST",
+      cache: "no-store",
+    }, { fallbackMessage: "RateMyProfessors refresh could not be started.", allowDetail: true });
+    if (result) {
+      result.textContent = "RateMyProfessors refresh started for all active instructors.";
+      result.className = "admin-seat-refresh-result is-success";
+    }
+    await loadAdminHealth();
+  } catch (err) {
+    if (result) {
+      result.textContent = safeErrorMessage(err, "RateMyProfessors refresh could not be started.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
+async function refreshOneProfessorRating(event) {
+  event.preventDefault();
+  const input = document.querySelector("#admin-professor-refresh-input");
+  const button = document.querySelector("#admin-professor-refresh-one");
+  const result = document.querySelector("#admin-professor-refresh-result");
+  if (!input || !button) return;
+
+  const activeInstructors = Array.isArray(state.adminHealth?.professors?.active_instructors)
+    ? state.adminHealth.professors.active_instructors
+    : [];
+  const selected = activeInstructors.find(
+    (item) => normalizeProfessorName(item.name) === normalizeProfessorName(input.value),
+  );
+  if (!selected) {
+    if (result) {
+      result.textContent = "Select an active professor from the list.";
+      result.className = "admin-seat-refresh-result is-error";
+    }
+    return;
+  }
+
+  button.disabled = true;
+  if (result) {
+    result.textContent = `Starting a RateMyProfessors refresh for ${selected.name}...`;
+    result.className = "admin-seat-refresh-result";
+  }
+  try {
+    const payload = await fetchJson("/api/admin/professors/refresh/one", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instructor_name: selected.name }),
+    }, { fallbackMessage: "Professor refresh could not be started.", allowDetail: true });
+    if (result) {
+      result.textContent = `RateMyProfessors refresh started for ${payload.instructor_name || selected.name}.`;
+      result.className = "admin-seat-refresh-result is-success";
+    }
+    input.value = "";
+    await loadAdminHealth();
+  } catch (err) {
+    if (result) {
+      result.textContent = safeErrorMessage(err, "Professor refresh could not be started.");
+      result.className = "admin-seat-refresh-result is-error";
+    }
+  } finally {
+    if (button.isConnected) button.disabled = false;
   }
 }
 
@@ -3878,6 +4007,10 @@ async function boot() {
   if (adminSeatRefresh) adminSeatRefresh.addEventListener("click", refreshAllSeatsNow);
   const adminInstructorRefresh = document.querySelector("#admin-instructor-refresh-tba");
   if (adminInstructorRefresh) adminInstructorRefresh.addEventListener("click", refreshTbaProfessorsNow);
+  const adminProfessorRefreshAll = document.querySelector("#admin-professor-refresh-all");
+  if (adminProfessorRefreshAll) adminProfessorRefreshAll.addEventListener("click", refreshAllProfessorRatings);
+  const adminProfessorRefreshForm = document.querySelector("#admin-professor-refresh-form");
+  if (adminProfessorRefreshForm) adminProfessorRefreshForm.addEventListener("submit", refreshOneProfessorRating);
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
   setupAdminSeatCoursePicker();

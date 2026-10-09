@@ -345,6 +345,45 @@ class FakeRmpClient:
         return frozenset({"CS150"})
 
 
+def test_targeted_rmp_refresh_preserves_other_unmatched_history(tmp_path: Path) -> None:
+    output = tmp_path / "professor_ratings.json"
+    output.write_text(
+        json.dumps(
+            {
+                "provider": "RateMyProfessors",
+                "summary": {"instructors": 2, "matched": 0, "unmatched": 1, "errors": 0},
+                "records": [],
+                "unmatched": [
+                    {
+                        "name": "Daniel Ruiz",
+                        "normalized_name": "daniel ruiz",
+                        "course_codes": ["MATH150"],
+                        "reason": "no_name_match",
+                        "candidate_count": 0,
+                    }
+                ],
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = sync_rate_my_professors(
+        sections_path=SAMPLE_DATA,
+        output_path=output,
+        delay_seconds=0,
+        refresh=True,
+        names=("Maya Chen",),
+        client=FakeRmpClient(),
+    )
+
+    assert exit_code == 0
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert any(item["normalized_name"] == "maya chen" for item in document["records"])
+    assert any(item["normalized_name"] == "daniel ruiz" for item in document["unmatched"])
+    assert document["summary"]["instructors"] >= 2
+
+
 def test_rmp_sync_writes_resumable_cache_document(tmp_path: Path) -> None:
     output = tmp_path / "professor_ratings.json"
     exit_code = sync_rate_my_professors(

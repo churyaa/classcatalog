@@ -132,7 +132,7 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=64" in html
+    assert "app.js?v=65" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -223,7 +223,7 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "persistCompletedCourses(hidden.value);" in javascript
     assert 'persistCompletedCourses("");' in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=64" in html
+    assert "app.js?v=65" in html
 
 
 def test_theme_persists_in_first_party_cookie() -> None:
@@ -282,7 +282,7 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=64" in html
+    assert "app.js?v=65" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -424,7 +424,7 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
     assert 'styles.css?v=62' in html
-    assert 'app.js?v=64' in html
+    assert 'app.js?v=65' in html
 
 
 def test_admin_can_manage_manual_professor_matches() -> None:
@@ -432,6 +432,18 @@ def test_admin_can_manage_manual_professor_matches() -> None:
     javascript = (STATIC / "app.js").read_text(encoding="utf-8")
     css = (STATIC / "styles.css").read_text(encoding="utf-8")
 
+    assert 'id="admin-professor-refresh-all"' in html
+    assert 'id="admin-professor-refresh-form"' in html
+    assert 'id="admin-professor-refresh-input"' in html
+    assert 'id="admin-professor-refresh-options"' in html
+    assert 'id="admin-professor-refresh-one"' in html
+    assert 'id="admin-professor-refresh-result"' in html
+    assert 'id="admin-professor-refresh-status"' in html
+    assert "Refresh RateMyProfessors Data" in html
+    assert "function refreshAllProfessorRatings()" in javascript
+    assert "function refreshOneProfessorRating(event)" in javascript
+    assert 'fetchJson("/api/admin/professors/refresh", {' in javascript
+    assert 'fetchJson("/api/admin/professors/refresh/one", {' in javascript
     assert 'id="admin-professor-overrides-title"' in html
     assert 'id="admin-professor-override-form"' in html
     assert 'id="admin-professor-instructor-input"' in html
@@ -506,7 +518,7 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
     assert "styles.css?v=62" in html
-    assert "app.js?v=64" in html
+    assert "app.js?v=65" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:
@@ -575,7 +587,7 @@ def test_term_selector_defaults_to_current_semester_without_all_terms() -> None:
     assert 'const allTerms = ["", ...options.terms];' not in javascript
     assert 'button.textContent = term || "All terms";' not in javascript
     assert 'button.textContent = term;' in javascript
-    assert "app.js?v=64" in html
+    assert "app.js?v=65" in html
 
 
 

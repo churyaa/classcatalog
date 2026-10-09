@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 from fastapi.testclient import TestClient
 
@@ -38,6 +39,15 @@ def _login(client: TestClient) -> None:
     response = client.post("/api/admin/login", json={"password": ADMIN_PASSWORD})
     assert response.status_code == 200
     assert response.json() == {"authenticated": True}
+
+
+def _wait_for_professor_refresh(client: TestClient) -> dict[str, object]:
+    for _ in range(100):
+        refresh = client.get("/api/admin/health").json()["professors"]["refresh"]
+        if not refresh["running"]:
+            return refresh
+        time.sleep(0.01)
+    raise AssertionError("Professor refresh did not finish in time")
 
 
 class FakeAdminRmpClient:
@@ -152,6 +162,8 @@ def test_admin_health_endpoint_reports_coverage_and_data_sources_after_login(tmp
     assert payload["inventory"]["displayed_options"] == payload["coverage"]["displayed_options"]
     assert payload["professors"]["matched"] <= payload["professors"]["instructors"]
     assert payload["professors"]["unmatched"] == payload["professors"]["instructors"] - payload["professors"]["matched"]
+    assert payload["professors"]["active_instructors"]
+    assert payload["professors"]["refresh"]["running"] is False
     assert payload["files"]["sections"]["loaded"] is True
     assert payload["files"]["sections"]["name"] == SAMPLE_DATA_PATH.name
     assert payload["files"]["catalog"]["loaded"] is False
@@ -276,6 +288,79 @@ def test_admin_can_persist_apply_and_remove_manual_professor_match(tmp_path: Pat
     assert removed.status_code == 200
     assert removed.json()["deleted"] is True
     assert all(item.professor is None for item in repository.sections if item.instructor == "Maya Chen")
+
+
+def test_admin_can_refresh_all_or_one_professor_in_background(monkeypatch, tmp_path: Path) -> None:
+    ratings_path = tmp_path / "professor_ratings.json"
+    repository = _repository_with_unmatched_maya()
+    calls: list[tuple[str, ...] | None] = []
+
+    def fake_sync_rate_my_professors(**kwargs) -> int:
+        calls.append(kwargs.get("names"))
+        output_path = kwargs["output_path"]
+        output_path.write_text(
+            json.dumps(
+                {
+                    "provider": "RateMyProfessors",
+                    "generated_at": "2026-10-08T20:00:00+00:00",
+                    "summary": {"instructors": 1, "matched": 1, "unmatched": 0, "errors": 0},
+                    "records": [
+                        {
+                            "name": "Maya Chen",
+                            "normalized_name": "maya chen",
+                            "course_codes": ["CS150"],
+                            "rmp_name": "Maya Chen",
+                            "rmp_department": "Computer Science",
+                            "metrics": {
+                                "provider": "RateMyProfessors",
+                                "external_id": "987654",
+                                "rating": 4.7,
+                                "difficulty": 2.3,
+                                "would_take_again_percent": 95.0,
+                                "num_reviews": 88,
+                                "profile_url": "https://www.ratemyprofessors.com/professor/987654",
+                                "match_confidence": 1.0,
+                            },
+                        }
+                    ],
+                    "unmatched": [],
+                    "errors": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr("classcatalog.main.sync_rate_my_professors", fake_sync_rate_my_professors)
+    client = _client(repository, ratings_path=ratings_path)
+
+    assert client.post("/api/admin/professors/refresh").status_code == 401
+    _login(client)
+
+    full = client.post("/api/admin/professors/refresh")
+    assert full.status_code == 200
+    assert full.json() == {"accepted": True, "scope": "all", "instructor_name": None}
+    full_status = _wait_for_professor_refresh(client)
+    assert full_status["last_error"] is None
+    assert full_status["last_exit_code"] == 0
+    assert calls[0] is None
+
+    one = client.post(
+        "/api/admin/professors/refresh/one",
+        json={"instructor_name": "Maya Chen"},
+    )
+    assert one.status_code == 200
+    assert one.json() == {"accepted": True, "scope": "one", "instructor_name": "Maya Chen"}
+    one_status = _wait_for_professor_refresh(client)
+    assert one_status["scope"] == "one"
+    assert one_status["instructor_name"] == "Maya Chen"
+    assert calls[1] == ("Maya Chen",)
+
+    unknown = client.post(
+        "/api/admin/professors/refresh/one",
+        json={"instructor_name": "Not A Scheduled Professor"},
+    )
+    assert unknown.status_code == 404
 
 
 def test_admin_professor_override_validates_instructor_and_profile(tmp_path: Path) -> None:

@@ -779,7 +779,8 @@ def _write_sync_document(
 
 def sync_rate_my_professors(
     *,
-    sections_path: Path,
+    sections_path: Path | None = None,
+    sections: Sequence[CourseSection] | None = None,
     output_path: Path,
     delay_seconds: float = 0.35,
     timeout: float = 15.0,
@@ -788,9 +789,14 @@ def sync_rate_my_professors(
     names: Sequence[str] | None = None,
     client: RmpGraphqlClient | None = None,
 ) -> int:
-    raw_sections = json.loads(sections_path.read_text(encoding="utf-8"))
-    sections = tuple(CourseSection.model_validate(item) for item in raw_sections)
-    all_targets = collect_instructor_targets(sections)
+    if sections is None:
+        if sections_path is None:
+            raise ValueError("sections_path or sections must be supplied for an RMP sync")
+        raw_sections = json.loads(sections_path.read_text(encoding="utf-8"))
+        section_records = tuple(CourseSection.model_validate(item) for item in raw_sections)
+    else:
+        section_records = tuple(sections)
+    all_targets = collect_instructor_targets(section_records)
     all_target_names = {target.normalized_name for target in all_targets}
 
     selected_names = {normalize_person_name(name) for name in (names or ()) if normalize_person_name(name)}
@@ -808,6 +814,26 @@ def sync_rate_my_professors(
         for key, value in existing.items()
         if value.get("match_source") == RMP_MANUAL_MATCH_SOURCE
     }
+
+    prior_unmatched: list[dict[str, object]] = []
+    prior_errors: list[dict[str, object]] = []
+    if selected_names and output_path.is_file():
+        try:
+            raw_existing = json.loads(output_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            raw_existing = {}
+        if isinstance(raw_existing, dict):
+            prior_unmatched = [
+                dict(item)
+                for item in raw_existing.get("unmatched", [])
+                if isinstance(item, dict)
+            ]
+            prior_errors = [
+                dict(item)
+                for item in raw_existing.get("errors", [])
+                if isinstance(item, dict)
+            ]
+
     if refresh and not selected_names:
         cached: dict[str, dict[str, object]] = dict(manual_records)
     elif refresh:
@@ -819,9 +845,78 @@ def sync_rate_my_professors(
     else:
         cached = existing
     records = dict(cached)
-    unmatched: list[dict[str, object]] = []
-    errors: list[dict[str, object]] = []
+
+    def retained_side_record(item: dict[str, object]) -> bool:
+        normalized = str(
+            item.get("normalized_name")
+            or normalize_person_name(str(item.get("name") or ""))
+        )
+        return normalized in all_target_names and normalized not in selected_names
+
+    unmatched: list[dict[str, object]] = (
+        [item for item in prior_unmatched if retained_side_record(item)]
+        if selected_names
+        else []
+    )
+    errors: list[dict[str, object]] = (
+        [item for item in prior_errors if retained_side_record(item)]
+        if selected_names
+        else []
+    )
+    preserved_error_count = len(errors)
+    summary_target_count = len(all_targets) if selected_names else len(targets)
     api = client or RmpGraphqlClient(timeout=timeout)
+
+    # Manual matches keep their identity mapping, but their live metrics can still
+    # be refreshed from the saved RMP legacy profile ID. If the client used by a
+    # focused test does not expose direct lookup, keep the saved manual record.
+    if refresh and manual_records:
+        target_by_name = {target.normalized_name: target for target in targets}
+        lookup_legacy_id = getattr(api, "lookup_legacy_id", None)
+        if callable(lookup_legacy_id):
+            for normalized_name, manual_record in manual_records.items():
+                target = target_by_name.get(normalized_name)
+                if target is None:
+                    continue
+                metrics = manual_record.get("metrics")
+                external_id = metrics.get("external_id") if isinstance(metrics, dict) else None
+                try:
+                    legacy_id = int(str(external_id))
+                except (TypeError, ValueError):
+                    continue
+                try:
+                    candidate = lookup_legacy_id(legacy_id)
+                except Exception as exc:
+                    errors.append(
+                        {
+                            "name": target.name,
+                            "normalized_name": target.normalized_name,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
+                if candidate is None or candidate.legacy_id != legacy_id:
+                    errors.append(
+                        {
+                            "name": target.name,
+                            "normalized_name": target.normalized_name,
+                            "error": f"RateMyProfessors profile {legacy_id} could not be refreshed.",
+                        }
+                    )
+                    continue
+                refreshed_manual = dict(manual_record)
+                refreshed_manual.update(
+                    {
+                        "name": target.name,
+                        "normalized_name": target.normalized_name,
+                        "course_codes": list(target.course_codes),
+                        "rmp_name": candidate.name,
+                        "rmp_department": candidate.department,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "metrics": candidate.metrics(1.0).model_dump(mode="json"),
+                    }
+                )
+                records[normalized_name] = refreshed_manual
 
     print(
         "rmp_sync_started "
@@ -891,7 +986,7 @@ def sync_rate_my_professors(
             _write_sync_document(
                 output_path,
                 records.values(),
-                targets=len(targets),
+                targets=summary_target_count,
                 matched=len(records),
                 unmatched=unmatched,
                 errors=errors,
@@ -903,18 +998,19 @@ def sync_rate_my_professors(
     _write_sync_document(
         output_path,
         records.values(),
-        targets=len(targets),
+        targets=summary_target_count,
         matched=len(records),
         unmatched=unmatched,
         errors=errors,
     )
+    run_error_count = max(0, len(errors) - preserved_error_count)
     print(
         "rmp_sync_completed "
-        f"status={'passed' if not errors else 'partial'} instructors={len(targets)} "
+        f"status={'passed' if run_error_count == 0 else 'partial'} instructors={len(targets)} "
         f"matched={len(records)} unmatched={len(unmatched)} errors={len(errors)} "
         f"output='{output_path}'"
     )
-    return 0 if not errors else 2
+    return 0 if run_error_count == 0 else 2
 
 
 def build_parser() -> argparse.ArgumentParser:

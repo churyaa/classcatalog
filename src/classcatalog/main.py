@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, time, timezone
 from typing import Annotated
 from pathlib import Path
+from threading import RLock, Thread
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -49,6 +50,7 @@ from classcatalog.ratings import (
     is_placeholder_instructor,
     normalize_person_name,
     parse_rmp_profile_id,
+    sync_rate_my_professors,
 )
 from classcatalog.repository import (
     ACTIVE_CATALOG_PATH,
@@ -100,6 +102,10 @@ class AdminSeatRefreshRequest(BaseModel):
 class AdminProfessorOverrideRequest(BaseModel):
     instructor_name: str = Field(min_length=1, max_length=200)
     rmp_profile: str = Field(min_length=1, max_length=500)
+
+
+class AdminProfessorRefreshRequest(BaseModel):
+    instructor_name: str = Field(min_length=1, max_length=200)
 
 
 def _file_health(path: Path | None) -> dict[str, object]:
@@ -193,6 +199,7 @@ def _admin_health_snapshot(
     manual_rating_overrides: tuple[dict[str, object], ...] = (),
     manual_ratings_enabled: bool = False,
     manual_ratings_error: str | None = None,
+    ratings_refresh_status: dict[str, object] | None = None,
 ) -> dict[str, object]:
     audit = repository.coverage_audit()
     catalog_status = repository.catalog.status()
@@ -256,8 +263,20 @@ def _admin_health_snapshot(
             "sync": ratings_summary,
             "manual_matching_enabled": manual_ratings_enabled,
             "manual_matching_error": manual_ratings_error,
+            "active_instructors": instructor_inventory,
             "unmatched_instructors": unmatched_instructors,
             "manual_overrides": list(manual_rating_overrides),
+            "refresh": ratings_refresh_status or {
+                "enabled": ratings_path is not None,
+                "running": False,
+                "scope": None,
+                "instructor_name": None,
+                "started_at": None,
+                "completed_at": None,
+                "last_error": None,
+                "last_exit_code": None,
+                "updated_section_listings": 0,
+            },
         },
         "catalog": {
             "loaded": catalog_status.loaded,
@@ -445,6 +464,18 @@ def create_app(
         active_seat_service = SeatRefreshService(active_repository)
     admin_sessions: dict[str, float] = {}
     failed_admin_logins: dict[str, list[float]] = {}
+    ratings_refresh_lock = RLock()
+    ratings_refresh_state: dict[str, object] = {
+        "enabled": active_ratings_path is not None,
+        "running": False,
+        "scope": None,
+        "instructor_name": None,
+        "started_at": None,
+        "completed_at": None,
+        "last_error": None,
+        "last_exit_code": None,
+        "updated_section_listings": 0,
+    }
 
     def _record_startup_error(path: str, detail: str | None) -> None:
         if not detail:
@@ -501,6 +532,77 @@ def create_app(
             return ratings_editor.manual_overrides(), None
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return (), f"{type(exc).__name__}: {exc}"
+
+    def _ratings_refresh_snapshot() -> dict[str, object]:
+        with ratings_refresh_lock:
+            return dict(ratings_refresh_state)
+
+    def _run_ratings_refresh(instructor_name: str | None) -> None:
+        try:
+            exit_code = sync_rate_my_professors(
+                sections=active_repository.sections,
+                output_path=active_ratings_path,
+                refresh=True,
+                names=((instructor_name,) if instructor_name else None),
+                client=active_rmp_client,
+            )
+            changed_sections = active_repository.reload_ratings(active_ratings_path)
+            completed_at = datetime.now(timezone.utc).isoformat()
+            with ratings_refresh_lock:
+                ratings_refresh_state.update(
+                    {
+                        "running": False,
+                        "completed_at": completed_at,
+                        "last_error": None,
+                        "last_exit_code": exit_code,
+                        "updated_section_listings": changed_sections,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - background Admin job must retain failure state
+            LOGGER.exception(
+                "rmp_admin_refresh_failed scope=%s instructor=%s",
+                "one" if instructor_name else "all",
+                instructor_name,
+            )
+            completed_at = datetime.now(timezone.utc).isoformat()
+            with ratings_refresh_lock:
+                ratings_refresh_state.update(
+                    {
+                        "running": False,
+                        "completed_at": completed_at,
+                        "last_error": f"{type(exc).__name__}: {exc}",
+                        "last_exit_code": None,
+                        "updated_section_listings": 0,
+                    }
+                )
+
+    def _start_ratings_refresh(instructor_name: str | None = None) -> bool:
+        if active_ratings_path is None:
+            return False
+        with ratings_refresh_lock:
+            if bool(ratings_refresh_state.get("running")):
+                return False
+            ratings_refresh_state.update(
+                {
+                    "enabled": True,
+                    "running": True,
+                    "scope": "one" if instructor_name else "all",
+                    "instructor_name": instructor_name,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": None,
+                    "last_error": None,
+                    "last_exit_code": None,
+                    "updated_section_listings": 0,
+                }
+            )
+        worker = Thread(
+            target=_run_ratings_refresh,
+            args=(instructor_name,),
+            name="classcatalog-rmp-refresh",
+            daemon=True,
+        )
+        worker.start()
+        return True
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -908,7 +1010,61 @@ def create_app(
             manual_rating_overrides=manual_overrides,
             manual_ratings_enabled=ratings_editor is not None,
             manual_ratings_error=manual_ratings_error,
+            ratings_refresh_status=_ratings_refresh_snapshot(),
         )
+
+    @app.post("/api/admin/professors/refresh")
+    async def admin_refresh_all_professors(
+        request: Request,
+        response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        if active_ratings_path is None:
+            raise HTTPException(
+                status_code=409,
+                detail="A professor ratings cache path must be configured before refreshing RateMyProfessors data.",
+            )
+        if not _start_ratings_refresh():
+            raise HTTPException(status_code=409, detail="A RateMyProfessors refresh is already running.")
+        return {
+            "accepted": True,
+            "scope": "all",
+            "instructor_name": None,
+        }
+
+    @app.post("/api/admin/professors/refresh/one")
+    async def admin_refresh_one_professor(
+        payload: AdminProfessorRefreshRequest,
+        request: Request,
+        response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        if active_ratings_path is None:
+            raise HTTPException(
+                status_code=409,
+                detail="A professor ratings cache path must be configured before refreshing RateMyProfessors data.",
+            )
+        normalized_name = normalize_person_name(payload.instructor_name)
+        targets = {
+            str(item["normalized_name"]): item
+            for item in _instructor_inventory(active_repository)
+        }
+        target = targets.get(normalized_name)
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Select an instructor from the active class schedule.",
+            )
+        instructor_name = str(target["name"])
+        if not _start_ratings_refresh(instructor_name):
+            raise HTTPException(status_code=409, detail="A RateMyProfessors refresh is already running.")
+        return {
+            "accepted": True,
+            "scope": "one",
+            "instructor_name": instructor_name,
+        }
 
     @app.post("/api/admin/professors/overrides")
     async def admin_add_professor_override(
@@ -922,6 +1078,11 @@ def create_app(
             raise HTTPException(
                 status_code=409,
                 detail="A professor ratings cache path must be configured before adding manual matches.",
+            )
+        if bool(_ratings_refresh_snapshot().get("running")):
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for the RateMyProfessors refresh to finish before editing manual matches.",
             )
 
         normalized_name = normalize_person_name(payload.instructor_name)
@@ -988,6 +1149,11 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         if ratings_editor is None or active_ratings_path is None:
             raise HTTPException(status_code=404, detail="Manual professor matching is not configured.")
+        if bool(_ratings_refresh_snapshot().get("running")):
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for the RateMyProfessors refresh to finish before editing manual matches.",
+            )
 
         removed = ratings_editor.delete(instructor_name)
         if removed is None:

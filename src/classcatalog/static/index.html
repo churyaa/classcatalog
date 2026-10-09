@@ -618,10 +618,24 @@
                 <p class="admin-kicker">RateMyProfessors</p>
                 <h3 id="admin-rmp-title">Professor coverage</h3>
               </div>
+              <button id="admin-professor-refresh-all" class="admin-refresh" type="button">Refresh RateMyProfessors Data</button>
             </div>
             <div id="admin-rmp-metrics" class="admin-metric-grid admin-metric-grid-compact"></div>
             <div id="admin-rmp-progress" class="admin-progress" aria-label="RateMyProfessors match rate"><span></span></div>
             <p id="admin-rmp-sync" class="admin-note"></p>
+            <form id="admin-professor-refresh-form" class="admin-seat-refresh-form">
+              <label for="admin-professor-refresh-input">Refresh one professor</label>
+              <div class="admin-seat-refresh-row">
+                <div class="admin-seat-course-autocomplete">
+                  <input id="admin-professor-refresh-input" name="instructor_name" type="text" list="admin-professor-refresh-options" placeholder="Type an active professor name" autocomplete="off" data-no-search required>
+                  <datalist id="admin-professor-refresh-options"></datalist>
+                </div>
+                <button id="admin-professor-refresh-one" class="admin-refresh" type="submit">Refresh Professor</button>
+              </div>
+              <span class="completed-course-help">Refreshes ratings, review counts, and automatic matching for one active instructor.</span>
+              <p id="admin-professor-refresh-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+            </form>
+            <p id="admin-professor-refresh-status" class="admin-note"></p>
           </section>
 
           <section class="admin-section" aria-labelledby="admin-completeness-title">
@@ -1293,7 +1307,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=64&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
+<script src="/static/app.js?v=65&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>
