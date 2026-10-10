@@ -301,6 +301,60 @@ def _write_subject_inventory(path: Path, payload: dict[str, object]) -> None:
     _atomic_write(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _load_verified_subject_inventory(
+    path: Path,
+    *,
+    term: str,
+    term_code: str,
+) -> tuple[str, ...]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Subject inventory must be a JSON object.")
+
+    document_term = str(raw.get("term") or "").strip()
+    document_term_code = str(raw.get("term_code") or "").strip()
+    if document_term != term or document_term_code != term_code:
+        raise ValueError(
+            "Subject inventory term metadata does not match the requested scrape "
+            f"({document_term!r}/{document_term_code!r} != {term!r}/{term_code!r})."
+        )
+
+    raw_subjects = raw.get("discovered_subjects")
+    if (
+        not isinstance(raw_subjects, list)
+        or not raw_subjects
+        or any(not isinstance(value, str) or not value.strip() for value in raw_subjects)
+    ):
+        raise ValueError(
+            "Subject inventory must contain a non-empty discovered_subjects string list."
+        )
+
+    return tuple(
+        dict.fromkeys(
+            " ".join(normalize_subject_input(value).split())
+            for value in raw_subjects
+        )
+    )
+
+
+def _subject_inventory_candidate_paths(
+    *,
+    configured_path: Path | None,
+    checkpoint_path: Path,
+    term: str,
+) -> tuple[Path, ...]:
+    candidates = (
+        configured_path,
+        checkpoint_path.parent / "subject-inventory.json",
+        _default_subject_inventory_output(term),
+    )
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate is not None and candidate not in unique:
+            unique.append(candidate)
+    return tuple(unique)
+
+
 def _subject_output_path(root: Path, subject: str) -> Path:
     return root / f"{_slug(subject)}.json"
 
@@ -1690,6 +1744,7 @@ def run(args: argparse.Namespace) -> int:
             )
             return 2
         discovered_subjects: tuple[str, ...] = ()
+        inventory_path: Path | None = None
         if resume_checkpoint is None and args.all_subjects and not args.known_subjects_only:
             try:
                 discovered_subjects = client.discover_subjects(term_code=term_code)
@@ -1711,6 +1766,42 @@ def run(args: argparse.Namespace) -> int:
                 new_subjects=document["new_subjects"],
                 manifest=str(inventory_path),
             )
+
+        verified_live_subjects: frozenset[str] | None = (
+            frozenset(discovered_subjects) if discovered_subjects else None
+        )
+        verified_subject_inventory_path = inventory_path
+        if verified_live_subjects is None and (args.resume or args.all_subjects):
+            for candidate in _subject_inventory_candidate_paths(
+                configured_path=args.subject_inventory_output,
+                checkpoint_path=checkpoint_path,
+                term=term,
+            ):
+                if not candidate.is_file():
+                    continue
+                try:
+                    inventory_subjects = _load_verified_subject_inventory(
+                        candidate,
+                        term=term,
+                        term_code=term_code,
+                    )
+                except (OSError, json.JSONDecodeError, ValueError) as exc:
+                    logger.warning(
+                        "subject_inventory_ignored",
+                        manifest=str(candidate),
+                        error=str(exc),
+                    )
+                    continue
+                verified_live_subjects = frozenset(inventory_subjects)
+                verified_subject_inventory_path = candidate
+                logger.info(
+                    "subject_inventory_loaded",
+                    term=term,
+                    term_code=term_code,
+                    discovered=len(inventory_subjects),
+                    manifest=str(candidate),
+                )
+                break
 
         try:
             if resume_checkpoint is not None and not args.subjects:
@@ -1910,12 +2001,33 @@ def run(args: argparse.Namespace) -> int:
                             path=str(path),
                         )
 
+                    subject_verified_absent = (
+                        verified_live_subjects is not None
+                        and subject not in verified_live_subjects
+                    )
+                    if subject_verified_absent:
+                        logger.info(
+                            "subject_not_observed_in_preflight",
+                            subject=subject,
+                            manifest=(
+                                str(verified_subject_inventory_path)
+                                if verified_subject_inventory_path is not None
+                                else None
+                            ),
+                            message=(
+                                "The live subject inventory did not expose this static seed; "
+                                "the exact subject search must also confirm the facet is absent "
+                                "before it can be accepted as a zero-offering subject."
+                            ),
+                        )
+
                     pages, result = client.scrape_subject(
                         term=term,
                         term_code=term_code,
                         subject=subject,
                         page_observer=observe_page,
                         require_detail_urls=detail_limit > 0,
+                        verified_absent=subject_verified_absent,
                     )
                     if pages.partition_pages:
                         for leaf_number, partition in enumerate(
@@ -2090,6 +2202,7 @@ def run(args: argparse.Namespace) -> int:
                     and result.filtered_result_count == 0
                     and (
                         pages is None
+                        or pages.verified_absent
                         or has_no_results_message(pages.initial_html)
                     )
                 ):
@@ -2099,8 +2212,9 @@ def run(args: argparse.Namespace) -> int:
                         term=term,
                         term_code=term_code,
                         message=(
-                            "PeopleSoft returned an explicit no-results page; treating "
-                            "this valid subject as having zero offerings for the term."
+                            "PeopleSoft confirmed no exact offerings for this subject by an "
+                            "explicit no-results page or by a verified live-inventory absence "
+                            "plus a missing exact Subject facet."
                         ),
                     )
 

@@ -537,6 +537,58 @@ def test_zero_exact_subject_rows_without_no_results_message_still_require_status
         client.scrape_subject(term="Fall 2026", term_code="2267", subject="STS")
 
 
+def test_verified_absent_subject_with_fuzzy_results_is_complete_zero_offering() -> None:
+    landing_url = "https://example.test/landing?Page=SSR_CLSRCH_MAIN_FL"
+    result_url = "https://example.test/results?SEARCH_TEXT=A+S&ES_STRM=2275"
+    unrelated = """
+    <html><body>
+      <form id='win0'>
+        <input type='hidden' name='PTS_SELECT$chk$0' value='N'>
+        <input type='checkbox' id='PTS_SELECT$0' name='PTS_SELECT$0' value='Y'>
+        <label for='PTS_SELECT$0'>Open Classes</label>
+        <input type='hidden' name='PTS_SELECT$chk$6' value='N'>
+        <input type='checkbox' id='PTS_SELECT$6' name='PTS_SELECT$6' value='Y'>
+        <label for='PTS_SELECT$6'>CCS/Chicana And Chicano Studies</label>
+        <ul><li class='ps_grid-row psc_rowact'><p hidden>CCS 100</p>
+        <a href='/psc/CSDPRD/EMPLOYEE/SA/c/SSR_STUDENT_FL.SSR_CS_WRAP_FL.GBL?CRSE_ID=1&amp;CRSE_OFFER_NBR=1&amp;STRM=2275&amp;ACAD_CAREER=UGRD&amp;CLASS_NBR=1'>Unrelated course</a>
+        </li></ul>
+      </form>
+    </body></html>
+    """
+    fake = FakeSession(
+        [
+            _response(landing_url, _fixture("landing_terms.html")),
+            _response(result_url, unrelated),
+        ]
+    )
+    client = SdsuPeopleSoftSession(
+        SdsuHttpConfig(
+            landing_url="https://example.test/landing",
+            results_url="https://example.test/results",
+            delay_seconds=0,
+            max_retries=0,
+            in_run_state_recovery_attempts=1,
+            state_circuit_breaker_threshold=1,
+        ),
+        http_session=fake,  # type: ignore[arg-type]
+    )
+
+    pages, result = client.scrape_subject(
+        term="Summer 2027",
+        term_code="2275",
+        subject="A S",
+        verified_absent=True,
+    )
+
+    assert pages.verified_absent is True
+    assert result.complete is True
+    assert result.courses == ()
+    assert result.initial_result_count == 0
+    assert result.filtered_result_count == 0
+    assert result.exact_facet_applied is False
+    assert [method for method, _url, _kwargs in fake.requests] == ["GET", "GET"]
+
+
 def test_scrape_subject_retries_recoverable_state_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

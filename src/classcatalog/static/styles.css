@@ -2346,6 +2346,32 @@ button:focus-visible {
 }
 .schedule-drawer-title h2 { margin: 0; font-size: 1.16rem; line-height: 1.15; }
 .schedule-drawer-title p { margin: .16rem 0 0; color: var(--muted); font-size: .7rem; font-weight: 750; }
+.schedule-term-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .38rem;
+  margin-top: .22rem;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 750;
+}
+.schedule-term-select {
+  width: auto;
+  min-width: 8.8rem;
+  min-height: 1.9rem;
+  padding: .28rem 1.8rem .28rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  color: var(--theme-text);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 850;
+}
+.schedule-term-select:disabled { cursor: default; opacity: .72; }
+.schedule-term-separator { color: var(--muted); }
+
 .schedule-drawer-close,
 .schedule-detail-back {
   min-height: 2.2rem;

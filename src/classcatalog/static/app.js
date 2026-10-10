@@ -26,6 +26,7 @@ const state = {
   serviceMessages: {},
   scheduleDrawerOpen: false,
   scheduleDetailKey: null,
+  scheduleSelectedTerm: "",
   inboxDrawerOpen: false,
   announcements: [],
 };
@@ -694,7 +695,38 @@ function scheduleSectionKey(section) {
   return sectionFavoriteKey(section);
 }
 
-function scheduledSections(term = state.selectedTerm) {
+function scheduleTerms() {
+  return Array.isArray(state.options?.terms)
+    ? state.options.terms.map((term) => String(term || "").trim()).filter(Boolean)
+    : [];
+}
+
+function selectedScheduleTerm() {
+  const terms = scheduleTerms();
+  if (state.scheduleSelectedTerm && terms.includes(state.scheduleSelectedTerm)) {
+    return state.scheduleSelectedTerm;
+  }
+  if (state.selectedTerm && terms.includes(state.selectedTerm)) return state.selectedTerm;
+  return currentAcademicTerm(terms) || terms[0] || state.selectedTerm || "";
+}
+
+function syncScheduleTermSelect() {
+  const select = document.querySelector("#schedule-term-select");
+  if (!select) return;
+  const terms = scheduleTerms();
+  const selectedTerm = selectedScheduleTerm();
+  select.replaceChildren();
+  terms.forEach((term) => {
+    const option = document.createElement("option");
+    option.value = term;
+    option.textContent = term;
+    select.appendChild(option);
+  });
+  select.value = selectedTerm;
+  select.disabled = terms.length <= 1;
+}
+
+function scheduledSections(term = selectedScheduleTerm()) {
   return Object.values(readSchedule())
     .filter((section) => section && section.course_code && section.schedule_number)
     .filter((section) => !term || String(section.term || "").trim() === term);
@@ -872,8 +904,10 @@ async function refreshScheduleSeats() {
   try {
     const payload = await fetchJson(`/api/seats?${params.toString()}`, { cache: "no-store" });
     const records = payload.records || {};
+    const term = selectedScheduleTerm();
     const schedule = readSchedule();
     Object.entries(schedule).forEach(([key, section]) => {
+      if (String(section?.term || "").trim() !== term) return;
       schedule[key] = applySeatRecordsToFavorite(section, records);
     });
     writeSchedule(schedule);
@@ -1045,7 +1079,7 @@ function renderScheduleDetail(section, key) {
 
 function openScheduleDetail(key) {
   const section = readSchedule()[key];
-  if (!section || String(section.term || "").trim() !== state.selectedTerm) return;
+  if (!section || String(section.term || "").trim() !== selectedScheduleTerm()) return;
   state.scheduleDetailKey = key;
   renderScheduleDrawer();
 }
@@ -1056,16 +1090,18 @@ function showScheduleCalendar() {
 }
 
 function renderScheduleDrawer() {
+  const term = selectedScheduleTerm();
   const termLabel = document.querySelector("#schedule-term-label");
   const countLabel = document.querySelector("#schedule-entry-count");
   const calendarView = document.querySelector("#schedule-calendar-view");
   const detailView = document.querySelector("#schedule-detail-view");
-  if (termLabel) termLabel.textContent = state.selectedTerm || "Current term";
-  const sections = scheduledSections();
+  if (termLabel) termLabel.textContent = term || "Current term";
+  syncScheduleTermSelect();
+  const sections = scheduledSections(term);
   if (countLabel) countLabel.textContent = `${sections.length} class${sections.length === 1 ? "" : "es"}`;
 
   const selected = state.scheduleDetailKey ? readSchedule()[state.scheduleDetailKey] : null;
-  if (selected && String(selected.term || "").trim() === state.selectedTerm) {
+  if (selected && String(selected.term || "").trim() === term) {
     renderScheduleDetail(selected, state.scheduleDetailKey);
     return;
   }
@@ -1106,6 +1142,7 @@ function setupScheduleDrawer() {
   const nav = document.querySelector("#schedule-nav");
   const close = document.querySelector("#schedule-close");
   const back = document.querySelector("#schedule-detail-back");
+  const termSelect = document.querySelector("#schedule-term-select");
   if (!nav) return;
 
   nav.addEventListener("click", () => {
@@ -1114,12 +1151,22 @@ function setupScheduleDrawer() {
   });
   close?.addEventListener("click", () => closeScheduleDrawer({ focusToggle: true }));
   back?.addEventListener("click", showScheduleCalendar);
+  termSelect?.addEventListener("change", () => {
+    const nextTerm = String(termSelect.value || "").trim();
+    if (!nextTerm || !scheduleTerms().includes(nextTerm)) return;
+    state.scheduleSelectedTerm = nextTerm;
+    state.scheduleDetailKey = null;
+    updateScheduleCount();
+    renderScheduleDrawer();
+    void refreshScheduleSeats();
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.scheduleDrawerOpen) {
       closeScheduleDrawer({ focusToggle: true });
     }
   });
 
+  syncScheduleTermSelect();
   updateScheduleCount();
 }
 

@@ -170,6 +170,7 @@ class RawSubjectPages:
     initial_html: str
     filtered_html: str
     exact_facet_applied: bool
+    verified_absent: bool = False
     partition_pages: tuple[RawSubjectPartitionPage, ...] = ()
 
 
@@ -591,6 +592,7 @@ class SdsuPeopleSoftSession:
         term_code: str,
         subject: str,
         page_observer: Callable[[str, str], None] | None = None,
+        verified_absent: bool = False,
         _search_text: str | None = None,
         _allow_aliases: bool = True,
         _observer_prefix: str = "",
@@ -759,14 +761,33 @@ class SdsuPeopleSoftSession:
                             term_code=term_code,
                             subject=subject,
                             page_observer=page_observer,
+                            verified_absent=False,
                             _search_text=alias,
                             _allow_aliases=False,
                             _observer_prefix=f"fallback-{alias_index}-",
                         )
                     except SubjectFacetNotFound as alias_error:
                         last_alias_error = alias_error
-                if last_alias_error is not None:
+                if last_alias_error is not None and not verified_absent:
                     raise last_alias_error
+
+            if verified_absent:
+                # Live Subject-facet discovery already established that this static
+                # seed was not exposed for the term. Still perform the normal search
+                # and alias checks above so non-observation alone never deletes a
+                # newly-added offering. Only after the exact Subject facet is also
+                # absent do we accept this fuzzy result page as a verified zero-offering
+                # subject instead of treating it as broken PeopleSoft component state.
+                return RawSubjectPages(
+                    subject=subject,
+                    term=term,
+                    term_code=term_code,
+                    search_url=inclusive_url,
+                    initial_html=initial_html,
+                    filtered_html=inclusive_html,
+                    exact_facet_applied=False,
+                    verified_absent=True,
+                )
             raise
 
         post = build_subject_facet_post(
@@ -1154,6 +1175,22 @@ class SdsuPeopleSoftSession:
         cap_initial = has_result_cap_warning(pages.initial_html)
         cap_filtered = has_result_cap_warning(pages.filtered_html)
 
+        if pages.verified_absent:
+            return SubjectScrapeResult(
+                term=pages.term,
+                term_code=pages.term_code,
+                subject=pages.subject,
+                fetched_at=datetime.now(UTC).isoformat(),
+                search_url=pages.search_url,
+                initial_result_count=0,
+                filtered_result_count=0,
+                exact_facet_applied=False,
+                initial_result_cap_warning=False,
+                filtered_result_cap_warning=False,
+                complete=True,
+                courses=(),
+            )
+
         if pages.partition_pages:
             merged: dict[tuple[str, ...], CourseSearchHit] = {}
             for partition in pages.partition_pages:
@@ -1292,6 +1329,7 @@ class SdsuPeopleSoftSession:
         subject: str,
         page_observer: Callable[[str, str], None] | None = None,
         require_detail_urls: bool = False,
+        verified_absent: bool = False,
     ) -> tuple[RawSubjectPages, SubjectScrapeResult]:
         pages: RawSubjectPages | None = None
         recoveries = max(self.config.in_run_state_recovery_attempts, 0)
@@ -1302,8 +1340,9 @@ class SdsuPeopleSoftSession:
                     term_code=term_code,
                     subject=subject,
                     page_observer=page_observer,
+                    verified_absent=verified_absent,
                 )
-                if has_result_cap_warning(pages.filtered_html):
+                if not pages.verified_absent and has_result_cap_warning(pages.filtered_html):
                     partition_pages = self._partition_capped_subject_pages(pages)
                     pages = RawSubjectPages(
                         subject=pages.subject,

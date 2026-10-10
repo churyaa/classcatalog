@@ -672,6 +672,94 @@ def test_resume_rebuilds_false_complete_search_instead_of_skipping_subject(
     assert refreshed.detail_courses_complete == 1
 
 
+def test_resume_uses_sibling_subject_inventory_for_verified_absence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "summer-2027-deep" / "checkpoint.json"
+    output_path = tmp_path / "aggregate.json"
+    subject_dir = checkpoint_path.parent / "subjects"
+    checkpoint = _new_checkpoint(
+        term="Summer 2027",
+        term_code="2275",
+        requested_subjects=("A S", "CS"),
+        detail_limit=0,
+        output_path=output_path,
+        subject_output_dir=subject_dir,
+    )
+    write_model(checkpoint_path, checkpoint)
+    (checkpoint_path.parent / "subject-inventory.json").write_text(
+        '{"term":"Summer 2027","term_code":"2275","discovered_subjects":["CS"]}',
+        encoding="utf-8",
+    )
+
+    class FakeSession:
+        scrape_calls: list[tuple[str, bool]] = []
+
+        def __init__(self, config: object) -> None:
+            del config
+
+        def __enter__(self) -> "FakeSession":
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            del exc_type, exc, traceback
+
+        def resolve_term_code(self, term: str, override: str | None) -> str:
+            assert term == "Summer 2027"
+            return override or "2275"
+
+        def scrape_subject(self, **kwargs: Any) -> tuple[RawSubjectPages, SubjectScrapeResult]:
+            subject = str(kwargs["subject"])
+            verified_absent = bool(kwargs["verified_absent"])
+            self.scrape_calls.append((subject, verified_absent))
+            hits = () if verified_absent else (_hit(subject, "100"),)
+            result = _result(subject, *hits).model_copy(
+                update={
+                    "term": "Summer 2027",
+                    "term_code": "2275",
+                    "exact_facet_applied": not verified_absent,
+                }
+            )
+            return (
+                RawSubjectPages(
+                    subject=subject,
+                    term="Summer 2027",
+                    term_code="2275",
+                    search_url=result.search_url,
+                    initial_html="<html></html>",
+                    filtered_html="<html></html>",
+                    exact_facet_applied=not verified_absent,
+                    verified_absent=verified_absent,
+                ),
+                result,
+            )
+
+    monkeypatch.setattr(scraper_main, "SdsuPeopleSoftSession", FakeSession)
+    args = _build_parser().parse_args(
+        [
+            "--term",
+            "Summer 2027",
+            "--term-code",
+            "2275",
+            "--resume",
+            "--checkpoint",
+            str(checkpoint_path),
+        ]
+    )
+
+    assert scraper_main.run(args) == 0
+    assert FakeSession.scrape_calls == [("A S", True), ("CS", False)]
+    absent = read_model(_subject_output_path(subject_dir, "A S"), SubjectDetailOutput)
+    assert absent.complete is True
+    assert absent.search_result.courses == ()
+
+
 def test_deep_run_rehydrates_partition_context_before_course_details(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

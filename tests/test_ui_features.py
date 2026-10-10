@@ -134,8 +134,8 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "Computer Science, B.S." not in javascript
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
-    assert "styles.css?v=62" in html
-    assert "app.js?v=66" in html
+    assert "styles.css?v=63" in html
+    assert "app.js?v=67" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -230,7 +230,7 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "restoreHideCompletedCourses();" in javascript
     assert "persistHideCompletedCourses(hideCompletedCourses.checked);" in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=66" in html
+    assert "app.js?v=67" in html
 
 
 def test_theme_persists_in_first_party_cookie() -> None:
@@ -288,8 +288,8 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.good" in css
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
-    assert "styles.css?v=62" in html
-    assert "app.js?v=66" in html
+    assert "styles.css?v=63" in html
+    assert "app.js?v=67" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -451,8 +451,8 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-metric-grid' in css
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
-    assert 'styles.css?v=62' in html
-    assert 'app.js?v=66' in html
+    assert 'styles.css?v=63' in html
+    assert 'app.js?v=67' in html
 
 
 def test_admin_can_manage_manual_professor_matches() -> None:
@@ -545,8 +545,8 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-table" in css
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
-    assert "styles.css?v=62" in html
-    assert "app.js?v=66" in html
+    assert "styles.css?v=63" in html
+    assert "app.js?v=67" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:
@@ -615,7 +615,7 @@ def test_term_selector_defaults_to_current_semester_without_all_terms() -> None:
     assert 'const allTerms = ["", ...options.terms];' not in javascript
     assert 'button.textContent = term || "All terms";' not in javascript
     assert 'button.textContent = term;' in javascript
-    assert "app.js?v=66" in html
+    assert "app.js?v=67" in html
 
 
 
@@ -628,6 +628,8 @@ def test_visual_schedule_builder_drawer_and_overlap_controls_are_present() -> No
     assert 'id="schedule-count" class="header-nav-count"' in html
     assert 'id="schedule-drawer"' in html
     assert 'id="schedule-calendar"' in html
+    assert 'id="schedule-term-select"' in html
+    assert 'aria-label="Schedule semester"' in html
     assert 'id="schedule-detail-view"' in html
     assert 'aria-controls="schedule-drawer"' in html
     assert 'M10 21H6.2C5.0799' in html
@@ -639,11 +641,17 @@ def test_visual_schedule_builder_drawer_and_overlap_controls_are_present() -> No
     assert 'button.textContent = `Overlaps with ${conflict.course_code}`;' in javascript
     assert 'button.disabled = true;' in javascript
     assert 'function renderScheduleCalendar(sections)' in javascript
+    assert 'function scheduleTerms()' in javascript
+    assert 'function selectedScheduleTerm()' in javascript
+    assert 'function syncScheduleTermSelect()' in javascript
+    assert 'state.scheduleSelectedTerm = nextTerm;' in javascript
+    assert 'termSelect?.addEventListener("change"' in javascript
     assert 'function renderScheduleDetail(section, key)' in javascript
     assert 'remove.textContent = "Remove from Schedule";' in javascript
     assert 'function refreshScheduleSeats()' in javascript
     assert 'class="component-group-toolbar"' in javascript
     assert '.schedule-drawer {' in css
+    assert '.schedule-term-select {' in css
     assert 'width: min(820px, 72vw);' in css
     assert 'background: color-mix(in srgb, var(--theme-accent) var(--schedule-tint), var(--surface-raised));' in css
     assert '.course-side-panel {' in css

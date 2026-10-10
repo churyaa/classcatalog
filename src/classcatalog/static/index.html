@@ -43,7 +43,7 @@
       if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=62&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
+  <link rel="stylesheet" href="/static/styles.css?v=63&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
   <link rel="stylesheet" href="/static/legal.css?v=1">
   <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
   <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
@@ -134,7 +134,12 @@
         </svg>
         <div>
           <h2>My Schedule</h2>
-          <p><span id="schedule-term-label">Current term</span> · <span id="schedule-entry-count">0 classes</span></p>
+          <div class="schedule-term-row">
+            <select id="schedule-term-select" class="schedule-term-select" aria-label="Schedule semester"></select>
+            <span class="schedule-term-separator" aria-hidden="true">·</span>
+            <span id="schedule-entry-count">0 classes</span>
+            <span id="schedule-term-label" hidden>Current term</span>
+          </div>
         </div>
       </div>
       <button id="schedule-close" class="schedule-drawer-close" type="button" aria-label="Close schedule">×</button>
@@ -1308,7 +1313,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=66&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
+<script src="/static/app.js?v=67&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>
