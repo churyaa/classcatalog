@@ -918,6 +918,193 @@ async function refreshScheduleSeats() {
   }
 }
 
+
+function escapeIcsText(value) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r?\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function scheduleIcsDate(timestamp) {
+  const date = new Date(timestamp);
+  return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function scheduleIcsTime(value) {
+  const parts = String(value || "").split(":");
+  if (parts.length < 2) return "";
+  const hour = Number(parts[0]);
+  const minute = Number(parts[1]);
+  const second = Number(parts[2] || 0);
+  if (![hour, minute, second].every(Number.isFinite)) return "";
+  return `${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}${String(second).padStart(2, "0")}`;
+}
+
+function scheduleIcsOccurrences(meeting) {
+  const range = parseMeetingDateRange(meeting?.meeting_dates);
+  const wantedDays = new Set((meeting?.days || []).map((day) => String(day).trim().toLowerCase()));
+  if (!range || !wantedDays.size) return [];
+  const jsDayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const dates = [];
+  for (let timestamp = range.start; timestamp <= range.end; timestamp += 24 * 60 * 60 * 1000) {
+    const day = jsDayNames[new Date(timestamp).getUTCDay()];
+    if (wantedDays.has(day)) dates.push(scheduleIcsDate(timestamp));
+  }
+  return dates;
+}
+
+function scheduleIcsRecurrence(meeting) {
+  const dates = scheduleIcsOccurrences(meeting);
+  if (!dates.length) return null;
+  const dayCodes = {
+    sun: "SU",
+    mon: "MO",
+    tue: "TU",
+    wed: "WE",
+    thu: "TH",
+    fri: "FR",
+    sat: "SA",
+  };
+  const byDays = [...new Set(
+    (meeting?.days || [])
+      .map((day) => dayCodes[String(day).trim().toLowerCase()])
+      .filter(Boolean),
+  )];
+  if (!byDays.length) return null;
+  return {
+    startDate: dates[0],
+    byDays,
+    count: dates.length,
+  };
+}
+
+function scheduleIcsTermSlug(term) {
+  return String(term || "schedule").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "schedule";
+}
+
+function buildScheduleIcs(term, sections) {
+  const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ClassCatalog//Schedule Export//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${escapeIcsText(`ClassCatalog ${term}`)}`,
+    "X-WR-TIMEZONE:America/Los_Angeles",
+    "BEGIN:VTIMEZONE",
+    "TZID:America/Los_Angeles",
+    "X-LIC-LOCATION:America/Los_Angeles",
+    "BEGIN:DAYLIGHT",
+    "TZOFFSETFROM:-0800",
+    "TZOFFSETTO:-0700",
+    "TZNAME:PDT",
+    "DTSTART:19700308T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU",
+    "END:DAYLIGHT",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:-0700",
+    "TZOFFSETTO:-0800",
+    "TZNAME:PST",
+    "DTSTART:19701101T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+  ];
+  const seen = new Set();
+  let eventCount = 0;
+  let skippedMeetingCount = 0;
+
+  sections.forEach((section) => {
+    schedulePhysicalComponents(section).forEach((component) => {
+      const meetings = Array.isArray(component.meetings) ? component.meetings : [];
+      meetings.forEach((meeting) => {
+        const startTime = scheduleIcsTime(meeting.start_time);
+        const endTime = scheduleIcsTime(meeting.end_time);
+        const recurrence = scheduleIcsRecurrence(meeting);
+        if (!startTime || !endTime || !recurrence) {
+          skippedMeetingCount += 1;
+          return;
+        }
+        const scheduleNumber = String(component.schedule_number || section.schedule_number || "").trim();
+        const componentName = String(component.component || "").trim();
+        const summary = componentName ? `${section.course_code} - ${componentName}` : section.course_code;
+        const instructor = String(meeting.instructor || component.instructor || section.instructor || "").trim();
+        const location = String(meeting.location || component.location || section.location || "").trim();
+        const descriptionParts = [
+          section.title,
+          scheduleNumber ? `Class #${scheduleNumber}` : "",
+          instructor ? `Instructor: ${instructor}` : "",
+          `Term: ${term}`,
+        ].filter(Boolean);
+
+        const recurrenceKey = `${recurrence.startDate}:${recurrence.byDays.join(",")}:${recurrence.count}`;
+        const dedupeKey = [term, section.course_code, scheduleNumber, componentName, recurrenceKey, startTime, endTime, location].join("|");
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+        const uidBase = `${scheduleIcsTermSlug(term)}-${scheduleIcsTermSlug(section.course_code)}-${scheduleNumber || "class"}-${recurrence.startDate}-${startTime}`;
+        lines.push(
+          "BEGIN:VEVENT",
+          `UID:${uidBase}@classcatalog`,
+          `DTSTAMP:${timestamp}`,
+          `DTSTART;TZID=America/Los_Angeles:${recurrence.startDate}T${startTime}`,
+          `DTEND;TZID=America/Los_Angeles:${recurrence.startDate}T${endTime}`,
+          `RRULE:FREQ=WEEKLY;BYDAY=${recurrence.byDays.join(",")};COUNT=${recurrence.count}`,
+          `SUMMARY:${escapeIcsText(summary)}`,
+        );
+        if (location) lines.push(`LOCATION:${escapeIcsText(location)}`);
+        if (descriptionParts.length) lines.push(`DESCRIPTION:${escapeIcsText(descriptionParts.join("\n"))}`);
+        lines.push("STATUS:CONFIRMED", "TRANSP:OPAQUE", "END:VEVENT");
+        eventCount += 1;
+      });
+    });
+  });
+
+  lines.push("END:VCALENDAR", "");
+  return { ics: lines.join("\r\n"), eventCount, skippedMeetingCount };
+}
+
+function exportScheduleToGoogleCalendar(button) {
+  const term = selectedScheduleTerm();
+  const sections = scheduledSections(term);
+  if (!sections.length) {
+    window.alert(`Add at least one class to the ${term || "selected"} schedule before exporting.`);
+    return;
+  }
+
+  const { ics, eventCount, skippedMeetingCount } = buildScheduleIcs(term, sections);
+  if (!eventCount) {
+    window.alert("This schedule does not have dated, timed meetings that can be exported to Google Calendar.");
+    return;
+  }
+
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `classcatalog-${scheduleIcsTermSlug(term)}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  window.open("https://calendar.google.com/calendar/r/settings/export", "_blank", "noopener,noreferrer");
+  if (button) {
+    const originalText = button.textContent;
+    const originalTitle = button.title;
+    button.textContent = "Calendar file downloaded";
+    button.title = skippedMeetingCount
+      ? `${skippedMeetingCount} TBA/asynchronous meeting row${skippedMeetingCount === 1 ? " was" : "s were"} skipped.`
+      : "Import the downloaded .ics file in the Google Calendar tab that just opened.";
+    window.setTimeout(() => {
+      button.textContent = originalText;
+      button.title = originalTitle;
+    }, 4500);
+  }
+}
+
 function scheduleMeetingEntries(sections) {
   const timed = [];
   const unscheduled = [];
@@ -1142,6 +1329,7 @@ function setupScheduleDrawer() {
   const nav = document.querySelector("#schedule-nav");
   const close = document.querySelector("#schedule-close");
   const back = document.querySelector("#schedule-detail-back");
+  const googleCalendar = document.querySelector("#schedule-google-calendar");
   const termSelect = document.querySelector("#schedule-term-select");
   if (!nav) return;
 
@@ -1151,6 +1339,7 @@ function setupScheduleDrawer() {
   });
   close?.addEventListener("click", () => closeScheduleDrawer({ focusToggle: true }));
   back?.addEventListener("click", showScheduleCalendar);
+  googleCalendar?.addEventListener("click", () => exportScheduleToGoogleCalendar(googleCalendar));
   termSelect?.addEventListener("change", () => {
     const nextTerm = String(termSelect.value || "").trim();
     if (!nextTerm || !scheduleTerms().includes(nextTerm)) return;

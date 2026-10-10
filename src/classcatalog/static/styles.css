@@ -2372,6 +2372,30 @@ button:focus-visible {
 .schedule-term-select:disabled { cursor: default; opacity: .72; }
 .schedule-term-separator { color: var(--muted); }
 
+.schedule-drawer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .45rem;
+}
+.schedule-google-calendar {
+  min-height: 2.2rem;
+  padding: .45rem .72rem;
+  border: 1px solid var(--theme-accent);
+  border-radius: .62rem;
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 8%, var(--surface-raised));
+  cursor: pointer;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.schedule-google-calendar:hover,
+.schedule-google-calendar:focus-visible {
+  color: var(--theme-background);
+  background: var(--theme-accent);
+}
 .schedule-drawer-close,
 .schedule-detail-back {
   min-height: 2.2rem;
@@ -2567,6 +2591,12 @@ button:focus-visible {
   font-weight: 900;
 }
 .schedule-remove-button:hover { background: color-mix(in srgb, #c52b3d 14%, var(--surface)); }
+@media (max-width: 560px) {
+  .schedule-drawer-header { align-items: flex-start; }
+  .schedule-drawer-actions { flex-direction: column-reverse; align-items: flex-end; }
+  .schedule-google-calendar { min-height: 2rem; padding: .36rem .52rem; font-size: .64rem; }
+}
+
 @media (max-width: 1050px) {
   .course-side-panel { grid-template-columns: minmax(8.7rem, 180px) minmax(0, 1fr); }
 }

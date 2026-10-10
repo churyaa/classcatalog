@@ -134,8 +134,8 @@ def test_catalog_profile_ui_and_live_filter_controls_are_present() -> None:
     assert "Computer Science, B.S." not in javascript
     assert ".catalog-status-loaded" in css
     assert ".program-summary" in css
-    assert "styles.css?v=63" in html
-    assert "app.js?v=67" in html
+    assert "styles.css?v=64" in html
+    assert "app.js?v=69" in html
     assert "required courses completed:" in javascript
     assert "summary.completed_required_course_count" in javascript
     assert "summary.required_course_count" in javascript
@@ -230,7 +230,7 @@ def test_major_and_completed_courses_persist_in_first_party_cookies() -> None:
     assert "restoreHideCompletedCourses();" in javascript
     assert "persistHideCompletedCourses(hideCompletedCourses.checked);" in javascript
     assert "clearLegacyProfileCookies" not in javascript
-    assert "app.js?v=67" in html
+    assert "app.js?v=69" in html
 
 
 def test_theme_persists_in_first_party_cookie() -> None:
@@ -288,8 +288,8 @@ def test_rate_my_professors_profile_links_and_metrics_are_rendered() -> None:
     assert ".rmp-score.good" in css
     assert ".rmp-score.mixed" in css
     assert ".rmp-score.poor" in css
-    assert "styles.css?v=63" in html
-    assert "app.js?v=67" in html
+    assert "styles.css?v=64" in html
+    assert "app.js?v=69" in html
 
 
 def test_class_difficulty_is_not_rendered_in_ui() -> None:
@@ -451,8 +451,8 @@ def test_admin_data_health_dashboard_is_private_and_has_login_controls() -> None
     assert '.admin-metric-grid' in css
     assert '.admin-status-card' in css
     assert '.admin-error-row' in css
-    assert 'styles.css?v=63' in html
-    assert 'app.js?v=67' in html
+    assert 'styles.css?v=64' in html
+    assert 'app.js?v=69' in html
 
 
 def test_admin_can_manage_manual_professor_matches() -> None:
@@ -545,8 +545,8 @@ def test_live_seat_refresh_ui_and_admin_controls_are_present() -> None:
     assert ".admin-seat-failure-table" in css
     assert ".admin-seat-failure-status.is-unresolved" in css
     assert ".admin-seat-failure-status.is-recovered" in css
-    assert "styles.css?v=63" in html
-    assert "app.js?v=67" in html
+    assert "styles.css?v=64" in html
+    assert "app.js?v=69" in html
 
 
 def test_global_api_failures_have_clean_user_messages_and_nonblocking_alerts() -> None:
@@ -615,7 +615,7 @@ def test_term_selector_defaults_to_current_semester_without_all_terms() -> None:
     assert 'const allTerms = ["", ...options.terms];' not in javascript
     assert 'button.textContent = term || "All terms";' not in javascript
     assert 'button.textContent = term;' in javascript
-    assert "app.js?v=67" in html
+    assert "app.js?v=69" in html
 
 
 
@@ -750,3 +750,36 @@ def test_inbox_drawer_and_admin_announcement_ui_are_present() -> None:
     assert '.inbox-drawer {' in css
     assert '.admin-ops-detail-grid {' in css
 
+
+
+def test_schedule_google_calendar_export_is_present() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+    assert 'id="schedule-google-calendar"' in html
+    assert "Google Calendar" in html
+    assert "function buildScheduleIcs(term, sections)" in javascript
+    assert "function exportScheduleToGoogleCalendar(button)" in javascript
+    assert 'TZID=America/Los_Angeles' in javascript
+    assert 'text/calendar;charset=utf-8' in javascript
+    assert 'classcatalog-${scheduleIcsTermSlug(term)}.ics' in javascript
+    assert 'https://calendar.google.com/calendar/r/settings/export' in javascript
+    assert 'googleCalendar?.addEventListener("click"' in javascript
+    assert '.schedule-google-calendar {' in css
+    assert "styles.css?v=64" in html
+    assert "app.js?v=69" in html
+
+
+def test_schedule_google_calendar_exports_recurring_series() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    javascript = (STATIC / "app.js").read_text(encoding="utf-8")
+
+    assert "function scheduleIcsRecurrence(meeting)" in javascript
+    assert 'mon: "MO"' in javascript
+    assert 'wed: "WE"' in javascript
+    assert '`RRULE:FREQ=WEEKLY;BYDAY=${recurrence.byDays.join(",")};COUNT=${recurrence.count}`' in javascript
+    assert "dates.forEach((date) =>" not in javascript
+    assert "recurrence.startDate" in javascript
+    assert "recurrence.count" in javascript
+    assert "app.js?v=69" in html
