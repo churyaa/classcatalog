@@ -1208,3 +1208,54 @@ def test_stable_option_signature_links_components_across_source_course_keys() ->
         "8301",
         "9301",
     ]
+
+
+
+def test_multi_search_query_ands_course_and_professor_terms() -> None:
+    template = repository.search(SearchFilters()).items[0]
+    matching = template.model_copy(
+        update={
+            "id": "multi-search-match",
+            "course_code": "COMM 103",
+            "subject": "COMM",
+            "catalog_number": "103",
+            "title": "Oral Communication",
+            "instructor": "Michael Rapp",
+        }
+    )
+    wrong_professor = matching.model_copy(
+        update={"id": "multi-search-wrong-professor", "instructor": "Different Professor"}
+    )
+    wrong_course = matching.model_copy(
+        update={
+            "id": "multi-search-wrong-course",
+            "course_code": "COMM 204",
+            "catalog_number": "204",
+        }
+    )
+
+    quoted = SearchFilters(query='"comm 103" "michael rapp"')
+    unquoted = SearchFilters(query="comm 103 michael rapp")
+
+    assert matches(matching, quoted)
+    assert matches(matching, unquoted)
+    assert not matches(wrong_professor, quoted)
+    assert not matches(wrong_course, quoted)
+
+
+def test_search_options_expose_scheduled_courses_and_instructors() -> None:
+    template = repository.search(SearchFilters()).items[0]
+    section = template.model_copy(
+        update={
+            "id": "autocomplete-section",
+            "course_code": "COMM 103",
+            "subject": "COMM",
+            "catalog_number": "103",
+            "title": "Oral Communication",
+            "instructor": "Michael Rapp",
+        }
+    )
+    options = CourseRepository((section,)).options()
+
+    assert [course.course_code for course in options.search_courses] == ["COMM 103"]
+    assert options.instructors == ("Michael Rapp",)

@@ -52,6 +52,18 @@ def normalize_course_code(value: str) -> str:
 
 
 _COURSE_CODE_PREFIX_QUERY_RE = re.compile(r"^[A-Z][A-Z ]*\s+\d+[A-Z]*$")
+_QUERY_TERM_RE = re.compile(r'"([^"\n]+)"|(\S+)')
+
+
+def _query_terms(value: str) -> tuple[str, ...]:
+    """Split search text into ANDed terms while preserving quoted phrases."""
+
+    terms: list[str] = []
+    for match in _QUERY_TERM_RE.finditer(value):
+        term = (match.group(1) or match.group(2) or "").strip().strip('"')
+        if term:
+            terms.append(term)
+    return tuple(terms)
 
 
 def _course_code_prefix_query(value: str) -> str | None:
@@ -134,21 +146,25 @@ def matches(section: CourseSection, filters: SearchFilters) -> bool:
             return False
 
     if filters.query:
-        course_code_prefix = _course_code_prefix_query(filters.query)
-        if course_code_prefix is not None:
-            if not normalize_course_code(section.course_code).startswith(course_code_prefix):
-                return False
-        else:
-            haystack = " ".join(
-                value
-                for value in (
-                    section.course_code,
-                    section.title,
-                    section.instructor or "",
-                )
-                if value
-            ).casefold()
-            if filters.query.casefold().strip() not in haystack:
+        query_terms = _query_terms(filters.query)
+        course_code = normalize_course_code(section.course_code)
+        haystack = " ".join(
+            value
+            for value in (
+                section.course_code,
+                section.title,
+                section.instructor or "",
+                *(component.instructor or "" for component in section.linked_components),
+            )
+            if value
+        ).casefold()
+        for query_term in query_terms:
+            course_code_prefix = _course_code_prefix_query(query_term)
+            if course_code_prefix is not None:
+                if not course_code.startswith(course_code_prefix):
+                    return False
+                continue
+            if query_term.casefold() not in haystack:
                 return False
 
     if filters.requirements and not set(filters.requirements).issubset(

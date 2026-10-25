@@ -1527,6 +1527,34 @@ function courseLookupByCode(code) {
   return courseLookupOptions().find((course) => normalizeCourseCode(course.course_code) === normalized) || null;
 }
 
+// classcatalog multi-search picker v1
+function searchCourseLookupOptions() {
+  const scheduled = Array.isArray(state.options?.search_courses) ? state.options.search_courses : [];
+  return scheduled.length ? scheduled : courseLookupOptions();
+}
+
+
+function quotedSearchTerm(value) {
+  return `"${String(value || "").replaceAll('"', "").trim()}"`;
+}
+
+
+
+
+
+
+
+
+function clearSearchQuery({ refresh = true } = {}) {
+  state.searchTokens = [];
+  const input = document.querySelector("#query");
+  if (input) input.value = "";
+  if (refresh) scheduleLoad();
+}
+
+
+
+
 function closeCompletedCourseSuggestions() {
   const box = document.querySelector("#completed-course-suggestions");
   const input = document.querySelector("#completed-course-input");
@@ -4236,6 +4264,7 @@ function setupFilterFlyouts() {
 }
 
 function clearFilters() {
+  clearSearchQuery({ refresh: false });
   document.querySelectorAll('.filters input[type="checkbox"]').forEach((input) => { input.checked = false; });
   document.querySelectorAll('#days .day-toggle').forEach((button) => {
     button.dataset.state = "off";

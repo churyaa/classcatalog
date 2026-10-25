@@ -223,6 +223,8 @@ class CourseLookupOption(BaseModel):
 class SearchOptions(BaseModel):
     terms: tuple[str, ...]
     courses: tuple[CourseLookupOption, ...] = ()
+    search_courses: tuple[CourseLookupOption, ...] = ()
+    instructors: tuple[str, ...] = ()
     campuses: tuple[str, ...] = ()
     requirements: tuple[str, ...]
     programs: tuple[str, ...]

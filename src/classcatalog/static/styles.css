@@ -2945,3 +2945,74 @@ button:focus-visible {
 .pagination-top .page-jump-input {
   min-height: 2rem;
 }
+
+/* Multi-search course/professor picker ------------------------------------- */
+.search-field { min-width: 0; }
+.search-picker {
+  display: flex;
+  min-height: 2.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .35rem;
+  padding: .28rem .4rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  color: var(--theme-text);
+  background: var(--surface-raised);
+}
+.search-picker:focus-within {
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-accent) 18%, transparent);
+}
+.search-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.search-chips:empty { display: none; }
+.search-chip {
+  display: inline-flex;
+  min-height: 1.8rem;
+  align-items: center;
+  gap: .26rem;
+  padding: .22rem .28rem .22rem .5rem;
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 42%, var(--line));
+  border-radius: 999px;
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 9%, var(--surface));
+  font-size: .7rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.search-chip-professor {
+  color: var(--theme-text);
+  border-color: color-mix(in srgb, var(--theme-ui) 55%, var(--line));
+  background: color-mix(in srgb, var(--theme-ui) 13%, var(--surface));
+}
+.search-chip-remove {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: currentColor;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: .95rem;
+  line-height: 1;
+}
+.search-chip-remove:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.search-autocomplete { position: relative; flex: 1 1 11rem; min-width: 8rem; }
+.search-autocomplete #query {
+  width: 100%;
+  min-height: 2rem;
+  padding: .28rem .3rem;
+  border: 0;
+  border-radius: .35rem;
+  color: var(--theme-text);
+  background: transparent;
+  box-shadow: none;
+}
+.search-autocomplete #query:focus { border: 0; box-shadow: none; }
+.search-suggestions { top: calc(100% + .45rem); min-width: min(28rem, calc(100vw - 2rem)); }
+.search-suggestion strong { font-size: .8rem; }
+.search-suggestion span { color: var(--muted); font-size: .69rem; }

@@ -332,6 +332,18 @@ class CourseRepository:
             title = (item.title or "").strip()
             if code not in course_titles or (not course_titles[code] and title):
                 course_titles[code] = title
+        search_courses = tuple(
+            CourseLookupOption(course_code=code, title=course_titles[code])
+            for code in sorted(course_titles)
+        )
+        instructor_names: set[str] = set()
+        for item in self._sections:
+            candidates = [item.instructor, *(component.instructor for component in item.linked_components)]
+            for candidate in candidates:
+                name = str(candidate or "").strip()
+                if name and not is_placeholder_instructor(name):
+                    instructor_names.add(name)
+
         for code in self._catalog.mapped_course_codes:
             normalized = (code or "").strip().upper()
             if normalized:
@@ -343,6 +355,8 @@ class CourseRepository:
         return SearchOptions(
             terms=tuple(sorted({item.term for item in self._sections}, key=_term_sort_key)),
             courses=courses,
+            search_courses=search_courses,
+            instructors=tuple(sorted(instructor_names, key=str.casefold)),
             campuses=campuses,
             requirements=sort_requirement_labels(requirements),
             programs=tuple(sorted(programs)),
