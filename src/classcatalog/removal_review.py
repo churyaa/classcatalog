@@ -30,9 +30,12 @@ LOG = logging.getLogger(__name__)
 STALE_HOURS = 48
 CONFIRMATION_HOURS = 1
 # CLASSCATALOG_AUTOMATIC_REMOVAL_V1
-AUTO_CYCLE_SECONDS = 3600       # Low-rate checks: at most two classes an hour.
-AUTO_INITIAL_SECONDS = 120      # Allow seat service to update first after startup.
-AUTO_CHECKS_PER_CYCLE = 2
+# CLASSCATALOG_REMOVAL_QUEUE_SPEED_V1: one SDSU-verified candidate per two-minute cycle.
+# A verification may itself take longer than two minutes, so the effective rate
+# is bounded by SDSU response time. This avoids bursts of live subject scrapes.
+AUTO_CYCLE_SECONDS = 120
+AUTO_INITIAL_SECONDS = 30
+AUTO_CHECKS_PER_CYCLE = 1
 AUTO_RETRY_SECONDS = 24 * 3600  # Avoid repeatedly scraping classes that still exist.
 
 
@@ -82,7 +85,6 @@ class RemovalReviewService:
         self._auto_deletions: deque[dict[str, object]] = deque(maxlen=25)
         self._auto_last_cycle: str | None = None
         self._auto_last_error: str | None = None
-        self._auto_current: dict[str, object] | None = None  # CLASSCATALOG_REMOVAL_ACTIVITY_V1
         self.on_deleted: Callable[[], None] | None = None
         # CLASSCATALOG_VISIBILITY_OVERLAY_V1: persistent visibility (never edit sections.json).
         self._visibility_path = data_path.with_name('hidden_classes.json')
@@ -98,7 +100,7 @@ class RemovalReviewService:
             records.setdefault(_key(section), []).append(section)
         return records
 
-    def candidates(self) -> dict[str, object]:
+    def candidates(self, *, limit: int | None = 250) -> dict[str, object]:
         now = _now()
         failures = (
             self.seat_service.admin_status().get("seat_failures", [])
@@ -155,12 +157,11 @@ class RemovalReviewService:
                 str(row["course_code"]),
             ))
             return {"stale_threshold_hours": self.stale_hours,
-                    "total_flagged": len(items), "items": items[:250],
+                    "total_flagged": len(items), "items": (items if limit is None else items[:max(0, limit)]),
                     "auto_enabled": bool(self._auto_thread and self._auto_thread.is_alive()),
                     "auto_interval_minutes": AUTO_CYCLE_SECONDS // 60,
                     "auto_last_cycle": self._auto_last_cycle,
                     "auto_last_error": self._auto_last_error,
-                    "auto_current": dict(self._auto_current) if self._auto_current else None,
                     "hidden_items": self.hidden_items(),
                     "recent_auto_hides": list(self._auto_deletions)}
 
@@ -182,7 +183,7 @@ class RemovalReviewService:
                 raise ValueError("This class number is not in the active dataset.")
             if len({(s.course_code, s.crse_id or "") for s in sections}) > 1:
                 raise ValueError("Cross-listed class numbers require separate manual dataset review.")
-            if key not in {item["key"] for item in self.candidates()["items"]}:
+            if key not in {item["key"] for item in self.candidates(limit=None)["items"]}:
                 raise ValueError("This class has no stale-seat or missing-number signal.")
             if any(st.get("status") == "checking" for st in self._states.values()):
                 raise ValueError("This class is already being verified.")
@@ -422,7 +423,6 @@ class RemovalReviewService:
             return {"hidden": True, "term": record["term"],
                     "course_code": record["course_code"],
                     "class_number": record["class_number"],
-                    "hidden_at": record["hidden_at"],
                     "visibility_path": str(self._visibility_path)}
 
     def unhide(self, key: str) -> dict[str, object]:
@@ -495,7 +495,7 @@ class RemovalReviewService:
                 with self._lock:
                     self._auto_last_cycle = _now().isoformat()
                     self._auto_last_error = None
-                for item in self.candidates()["items"]:
+                for item in self.candidates(limit=None)["items"]:
                     if checked >= max(0, max_checks) or self._auto_stop.is_set():
                         break
                     key = str(item["key"])
@@ -518,13 +518,6 @@ class RemovalReviewService:
                         self._auto_attempts[key] = time.monotonic()
                         self._states[key] = {"status": "checking"}
                         section = sections[0]
-                        # CLASSCATALOG_REMOVAL_ACTIVITY_V1: show exactly which candidate is in progress.
-                        self._auto_current = {
-                            "key": key, "term": section.term,
-                            "course_code": section.course_code,
-                            "class_number": section.schedule_number,
-                            "phase": "verifying", "started_at": _now().isoformat(),
-                        }
                     checked += 1
                     try:
                         if not self.data_path.is_file():
@@ -539,9 +532,6 @@ class RemovalReviewService:
                         # this verification, even if the class IDs happen to be the same.
                         if hashlib.sha256(self.data_path.read_bytes()).digest() != original_digest:
                             raise ValueError('Dataset changed during live verification; no class hidden.')
-                        with self._lock:
-                            if self._auto_current and self._auto_current.get("key") == key:
-                                self._auto_current["phase"] = "hiding"
                         result = self.hide_confirmed(key)
                         hidden += 1
                         with self._lock:
@@ -557,13 +547,7 @@ class RemovalReviewService:
                             self._auto_last_error = detail
                             self._states[key] = {"status": "inconclusive", "error": detail}
                         LOG.exception('automatic_class_hide_skipped class=%s', key)
-                    finally:
-                        with self._lock:
-                            if self._auto_current and self._auto_current.get('key') == key:
-                                self._auto_current = None
         finally:
-            with self._lock:
-                self._auto_current = None
             self._auto_lock.release()
         return {"checked": checked, "hidden": hidden}
 

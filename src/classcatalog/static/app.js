@@ -2805,36 +2805,21 @@ function renderAdminOperations(data) {
 }
 
 // CLASSCATALOG_REMOVAL_REVIEW_V1: deletion is never automatic.
-let removalMutationVersion = 0; // CLASSCATALOG_REMOVAL_ACTIVITY_V1
 async function loadRemovalReview() {
   if (!state.adminAuthenticated || window.location.hash !== "#admin") return;
   const tbody = document.querySelector("#admin-removal-list");
   if (!tbody) return;
-  const versionAtRequest = removalMutationVersion;
   try {
     const data = await fetchJson("/api/admin/removals", { cache: "no-store" },
       { fallbackMessage: "Flagged classes could not be loaded.", allowDetail: true });
-    if (versionAtRequest !== removalMutationVersion) return;
     const items = Array.isArray(data.items) ? data.items : [];
-    // CLASSCATALOG_REMOVAL_ACTIVITY_V1: automatic work has its own status, separate from manual feedback.
-    const activity = document.querySelector("#admin-removal-activity");
-    const recentLabel = document.querySelector("#admin-removal-recent");
-    const current = data.auto_current;
-    if (activity) {
-      if (current && current.course_code && current.class_number) {
-        const phase = current.phase === "hiding" ? "Hiding confirmed missing class" : "Verifying SDSU (two checks)";
-        activity.textContent = `${phase}: ${current.term} · ${current.course_code} · class #${current.class_number}. Started ${adminDate(current.started_at)}.`;
-      } else if (data.auto_enabled) {
-        activity.textContent = `Automatic removal checker: idle. Last check: ${data.auto_last_cycle ? adminDate(data.auto_last_cycle) : "not run yet"}. Next eligible candidates are checked on the hourly cycle.`;
-      } else {
-        activity.textContent = "Automatic removal checker is not running on this backend. Manual verification and hiding remain available.";
-      }
-    }
+    // CLASSCATALOG_AUTOMATIC_REMOVAL_V1: show automatic deletion activity even after its row disappears.
+    const result = document.querySelector("#admin-removal-result");
     const recent = Array.isArray(data.recent_auto_hides) ? data.recent_auto_hides : [];
-    if (recentLabel) {
-      recentLabel.textContent = recent.length
-        ? `Last automatically hidden: ${recent[0].term} · ${recent[0].course_code} · class #${recent[0].class_number} at ${adminDate(recent[0].hidden_at)}.`
-        : "No automatic hiding recorded in this server session.";
+    if (result && recent.length && !result.textContent.includes("Dismissed")) {
+      const latest = recent[0];
+      result.className = "admin-seat-refresh-result is-success";
+      result.textContent = `Automatically hidden ${latest.course_code} class #${latest.class_number} (${latest.term}). Original dataset preserved.`;
     }
     // CLASSCATALOG_VISIBILITY_OVERLAY_V1: restore controls for confirmed hidden physical sections.
     const hiddenBody = document.querySelector("#admin-removal-hidden-list");
@@ -2842,7 +2827,7 @@ async function loadRemovalReview() {
     if (hiddenBody) hiddenBody.innerHTML = hiddenItems.length ? hiddenItems.map((item) => {
       const sourceLink = item.source_url
         ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>` : "";
-      return `<tr data-removal-key="${escapeHtml(item.key)}"><td>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td><td>${escapeHtml(item.class_number)}</td><td><time datetime="${escapeHtml(item.hidden_at)}">${escapeHtml(adminDate(item.hidden_at))}</time></td><td><button class="admin-refresh" data-removal-action="unhide">Unhide class</button></td></tr>`;
+      return `<tr data-removal-key="${escapeHtml(item.key)}"><td>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td><td>${escapeHtml(item.class_number)}</td><td>${escapeHtml(item.hidden_at)}</td><td><button class="admin-refresh" data-removal-action="unhide">Unhide class</button></td></tr>`;
     }).join("") : '<tr><td colspan="4">No hidden classes.</td></tr>';
     tbody.innerHTML = items.length ? items.map((item) => {
       const label = `${item.term} · ${item.course_codes?.join(", ") || item.course_code}`;
@@ -2890,7 +2875,6 @@ async function changeRemovalReview(button) {
   const result = document.querySelector("#admin-removal-result");
   if (!key || !["verify", "hide", "unhide", "dismiss"].includes(action)) return;
   if (action === "hide" && !window.confirm(`Hide class ${key} from ClassCatalog? sections.json will be preserved.`)) return;
-  removalMutationVersion += 1;
   button.disabled = true;
   try {
     const payload = await fetchJson(`/api/admin/removals/${action}`, {
@@ -2899,12 +2883,9 @@ async function changeRemovalReview(button) {
     }, { fallbackMessage: "Removal action failed.", allowDetail: true });
     if (result) {
       result.className = "admin-seat-refresh-result is-success";
-      result.textContent = action === "verify"
-        ? `Verification started for class ${key}. The result will update in the flagged list.`
-        : action === "dismiss" ? `Dismissed class ${key} until the server restarts.`
-        : action === "hide"
-          ? `Class ${payload.course_code || key} #${payload.class_number || ""} successfully HIDDEN at ${adminDate(payload.hidden_at)}. It is now under Hidden classes below. sections.json was not changed.`
-          : `Class ${payload.course_code || key} #${payload.class_number || ""} successfully UNHIDDEN. It is visible on ClassCatalog again.`;
+      result.textContent = action === "verify" ? "Fresh SDSU verification started. Results will appear here shortly."
+        : action === "dismiss" ? `Dismissed ${key} until the server restarts.`
+        : action === "hide" ? `Hidden ${key}. Original sections.json preserved.` : `Unhidden ${key}. Class restored to public listings.`;
     }
     if (action === "hide" || action === "unhide") { await loadAdminHealth(); await loadRemovalReview(); await refreshHiddenFavoriteVisibility(); }
     else await loadRemovalReview();
