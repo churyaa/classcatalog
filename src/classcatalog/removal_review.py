@@ -1,13 +1,15 @@
-"""Manual, fail-closed review of possibly removed SDSU physical class sections.
+"""Verify missing SDSU physical classes and hide them in a durable overlay.
 
-This is intentionally NOT a scheduled deletion service.  Seat age and worker
-failures only nominate sections.  Only fresh, complete SDSU subject/course
-checks can authorize a manual administrator deletion.
+sections.json is immutable here; public search and SEO use the visible view.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from collections import deque
+from contextlib import contextmanager
+import hashlib
+import time
+from threading import Event, Lock
 import json
 import logging
 import os
@@ -18,15 +20,20 @@ from typing import Callable
 from uuid import uuid4
 
 from classcatalog.models import CourseSection
+from classcatalog.class_visibility import read_hidden, write_hidden  # CLASSCATALOG_VISIBILITY_OVERLAY_V1
 from classcatalog.repository import CourseRepository
-from classcatalog.deleted_history import DeletedClassHistory  # CLASSCATALOG_DELETED_HISTORY_V1
 from classcatalog.seats import is_course_info_url  # CLASSCATALOG_REMOVAL_SOURCE_LINK_V1
 from classcatalog.scraping.parser import parse_course_info_page
 from classcatalog.scraping.session import SdsuHttpConfig, SdsuPeopleSoftSession
 
 LOG = logging.getLogger(__name__)
-STALE_HOURS = 24
+STALE_HOURS = 48
 CONFIRMATION_HOURS = 1
+# CLASSCATALOG_AUTOMATIC_REMOVAL_V1
+AUTO_CYCLE_SECONDS = 3600       # Low-rate checks: at most two classes an hour.
+AUTO_INITIAL_SECONDS = 120      # Allow seat service to update first after startup.
+AUTO_CHECKS_PER_CYCLE = 2
+AUTO_RETRY_SECONDS = 24 * 3600  # Avoid repeatedly scraping classes that still exist.
 
 
 def _now() -> datetime:
@@ -62,12 +69,27 @@ class RemovalReviewService:
         self.repository = repository
         self.data_path = data_path
         self.seat_service = seat_service
-        self.deleted_history = DeletedClassHistory(data_path)
         self.probe = probe or self._probe_live
         self.stale_hours = stale_hours
         self._lock = RLock()
         self._states: dict[str, dict[str, object]] = {}
         self._ignored: set[str] = set()
+        # CLASSCATALOG_AUTOMATIC_REMOVAL_V1: automatic checks never infer absence from stale seats alone.
+        self._auto_lock = Lock()
+        self._auto_stop = Event()
+        self._auto_thread: Thread | None = None
+        self._auto_attempts: dict[str, float] = {}
+        self._auto_deletions: deque[dict[str, object]] = deque(maxlen=25)
+        self._auto_last_cycle: str | None = None
+        self._auto_last_error: str | None = None
+        self.on_deleted: Callable[[], None] | None = None
+        # CLASSCATALOG_VISIBILITY_OVERLAY_V1: persistent visibility (never edit sections.json).
+        self._visibility_path = data_path.with_name('hidden_classes.json')
+        self._dataset_digest = hashlib.sha256(data_path.read_bytes()).digest() if data_path.is_file() else None
+        self._full_sections = tuple(repository.sections)
+        self._hidden_records = read_hidden(self._visibility_path)
+        if self._hidden_records:
+            self._apply_visibility()
 
     def _physical_sections(self) -> dict[str, list[CourseSection]]:
         records: dict[str, list[CourseSection]] = {}
@@ -132,7 +154,13 @@ class RemovalReviewService:
                 str(row["course_code"]),
             ))
             return {"stale_threshold_hours": self.stale_hours,
-                    "total_flagged": len(items), "items": items[:250]}
+                    "total_flagged": len(items), "items": items[:250],
+                    "auto_enabled": bool(self._auto_thread and self._auto_thread.is_alive()),
+                    "auto_interval_minutes": AUTO_CYCLE_SECONDS // 60,
+                    "auto_last_cycle": self._auto_last_cycle,
+                    "auto_last_error": self._auto_last_error,
+                    "hidden_items": self.hidden_items(),
+                    "recent_auto_hides": list(self._auto_deletions)}
 
     def _confirmation_valid(self, key: str, sections: list[CourseSection], now: datetime) -> bool:
         state = self._states.get(key, {})
@@ -201,16 +229,16 @@ class RemovalReviewService:
             hits = [hit for hit in result.courses if hit.course_code == section.course_code]
             if section.crse_id:
                 hits.extend(hit for hit in result.courses if hit.crse_id == section.crse_id)
-            unique = list({(h.crse_id or h.course_code, h.acad_career): h for h in hits}.values())
+            unique = list({(h.course_code, h.crse_id or "", h.crse_offer_nbr or "", h.acad_career or ""): h for h in hits}.values())
             if not unique:
                 return True
             if result.partitioned:
                 result = client.prepare_partitioned_detail_result(result)
-                detail_urls = {(h.crse_id or h.course_code, h.acad_career): h.detail_url for h in result.courses}
+                detail_urls = {(h.course_code, h.crse_id or "", h.crse_offer_nbr or "", h.acad_career or ""): h.detail_url for h in result.courses}
             else:
-                detail_urls = {(h.crse_id or h.course_code, h.acad_career): h.detail_url for h in unique}
+                detail_urls = {(h.course_code, h.crse_id or "", h.crse_offer_nbr or "", h.acad_career or ""): h.detail_url for h in unique}
             for hit in unique:
-                url = detail_urls.get((hit.crse_id or hit.course_code, hit.acad_career))
+                url = detail_urls.get((hit.course_code, hit.crse_id or "", hit.crse_offer_nbr or "", hit.acad_career or ""))
                 if not url:
                     raise ValueError("SDSU did not supply a usable course-detail URL.")
                 pages = client.fetch_detail_pages(url)
@@ -293,6 +321,261 @@ class RemovalReviewService:
         except Exception:
             LOG.exception("removal_review_seat_prune_failed: restart backend to clear stale seat worker state")
 
+    # CLASSCATALOG_VISIBILITY_OVERLAY_V1: preserve all original records in memory.
+    # Only the public repository view is filtered; sections.json is immutable here.
+    def _hidden_match(self, section: CourseSection, records=None) -> bool:
+        records = self._hidden_records if records is None else records
+        item = records.get(_key(section))
+        if item is None:
+            return False
+        group = [s for s in self._full_sections if _key(s) == _key(section)]
+        return (tuple(sorted(item["section_ids"])) == tuple(sorted(s.id for s in group))
+                and item["course_code"] == section.course_code
+                and item.get("crse_id", "") == str(section.crse_id or ""))
+
+    def _apply_visibility(self) -> None:
+        # Preserve live seat/instructor changes for sections that remain visible.
+        visible_by_id = {s.id: s for s in self.repository.sections}
+        self._full_sections = tuple(visible_by_id.get(s.id, s) for s in self._full_sections)
+        filtered = tuple(s for s in self._full_sections if not self._hidden_match(s))
+        if filtered != self.repository.sections:
+            self.repository.replace_inventory(filtered)
+        self._prune_seat_refresh_after_deletion()
+        if self.on_deleted is not None:
+            self.on_deleted()  # Rebuild SEO from the visible repository only.
+
+    def _assert_same_dataset(self) -> list[CourseSection]:
+        """Never update visibility against a newer on-disk semester without restart."""
+        current = self.data_path.read_bytes()
+        if hashlib.sha256(current).digest() != self._dataset_digest:
+            raise ValueError("sections.json changed since startup; restart the backend before changing visibility.")
+        raw = json.loads(current)
+        if not isinstance(raw, list):
+            raise ValueError("Active dataset is not a JSON array.")
+        return [CourseSection.model_validate(entry) for entry in raw]
+
+    def hidden_items(self) -> list[dict[str, object]]:
+        with self._lock:
+            return [
+                {
+                    "key": item["key"], "term": item["term"],
+                    "course_code": item["course_code"],
+                    "class_number": item["class_number"],
+                    "hidden_at": item["hidden_at"],
+                    "verified_at": item["verified_at"],
+                    "reason": item.get("reason", "SDSU confirmed absent"),
+                    "source_url": item.get("source_url"),
+                    "applied": any(self._hidden_match(s) for s in self._full_sections
+                                   if _key(s) == item["key"]),
+                }
+                for item in self._hidden_records.values()
+            ]
+
+    def hide_confirmed(self, key: str) -> dict[str, object]:
+        """Hide a verified physical class; never rewrite the source dataset."""
+        with self._lock:
+            sections = self._physical_sections().get(key, [])
+            if not sections or not self._confirmation_valid(key, sections, _now()):
+                raise ValueError("Fresh, complete SDSU confirmation is required before hiding.")
+            if any((stamp := _datetime(s.seat_updated_at)) and
+                   (_now() - stamp).total_seconds() < self.stale_hours * 3600
+                   for s in sections):
+                raise ValueError("Recent seat data invalidated the removal confirmation.")
+            on_disk = self._assert_same_dataset()
+            original_group = [s for s in on_disk if _key(s) == key]
+            if sorted(s.id for s in original_group) != sorted(s.id for s in sections):
+                raise ValueError("Verified section IDs differ from the source dataset.")
+            if len({(s.course_code, s.crse_id or "") for s in original_group}) != 1:
+                raise ValueError("Cross-listed sections cannot be hidden automatically.")
+            # Reject orphaned mandatory linked components; a full rescrape is safer.
+            candidate = tuple(s for s in self.repository.sections if _key(s) != key)
+            if not candidate:
+                raise ValueError("Refusing to hide the entire active catalog.")
+            previous = self.repository.coverage_audit()
+            after = CourseRepository(candidate, catalog=self.repository.catalog).coverage_audit()
+            if (after.unaccounted_physical_sections > previous.unaccounted_physical_sections
+                    or after.unaccounted_course_section_listings > previous.unaccounted_course_section_listings):
+                raise ValueError("Hiding this section would orphan a linked class. Rescrape the term.")
+            if key in self._hidden_records:
+                raise ValueError("This class is already hidden.")
+            record = {
+                "key": key, "section_ids": sorted(s.id for s in original_group),
+                "class_number": sections[0].schedule_number,
+                "course_code": sections[0].course_code, "term": sections[0].term,
+                "crse_id": str(sections[0].crse_id or ""),
+                "hidden_at": _now().isoformat(),
+                "verified_at": str(self._states[key]["verified_at"]),
+                "reason": "confirmed_missing_from_sdsu",
+                "source_url": next((str(s.source_url) for s in sections
+                                    if is_course_info_url(s.source_url)), None),
+            }
+            updated = dict(self._hidden_records)
+            updated[key] = record
+            self._assert_same_dataset()
+            write_hidden(self._visibility_path, updated)
+            self._hidden_records = updated
+            self._apply_visibility()
+            self._states.pop(key, None)
+            self._ignored.discard(key)
+            return {"hidden": True, "term": record["term"],
+                    "course_code": record["course_code"],
+                    "class_number": record["class_number"],
+                    "visibility_path": str(self._visibility_path)}
+
+    def unhide(self, key: str) -> dict[str, object]:
+        """Admin-only visibility restore: the class remains in sections.json."""
+        with self._lock:
+            record = self._hidden_records.get(key)
+            if record is None:
+                raise ValueError("This class is not marked hidden.")
+            on_disk = self._assert_same_dataset()
+            group = [s for s in on_disk if _key(s) == key]
+            if (sorted(s.id for s in group) != sorted(record["section_ids"])
+                    or any(s.course_code != record["course_code"]
+                           or str(s.crse_id or "") != record.get("crse_id", "") for s in group)):
+                raise ValueError("The class changed during rescraping; restart or reconcile visibility.")
+            updated = dict(self._hidden_records)
+            del updated[key]
+            write_hidden(self._visibility_path, updated)
+            self._hidden_records = updated
+            self._apply_visibility()
+            self._auto_attempts.pop(key, None)
+            self._states.pop(key, None)
+            return {"unhidden": True, "term": record["term"],
+                    "course_code": record["course_code"],
+                    "class_number": record["class_number"]}
+
+    # CLASSCATALOG_AUTOMATIC_REMOVAL_V1: safe background verifier/hider.
+    @contextmanager
+    def _process_auto_lock(self):
+        """Single writer across Uvicorn workers on one host (OS-released lock)."""
+        lock_path = self.data_path.with_name(self.data_path.name + '.removal-auto.lock')
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        acquired = False
+        try:
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    if os.fstat(fd).st_size == 0:
+                        os.write(fd, b'0')
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except (BlockingIOError, OSError):
+                yield False
+                return
+            yield True
+        finally:
+            if acquired:
+                if os.name == 'nt':
+                    import msvcrt
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def auto_cycle(self, *, max_checks: int = AUTO_CHECKS_PER_CYCLE) -> dict[str, int]:
+        """Check bounded stale candidates; hide ONLY after fresh double verification."""
+        if not self._auto_lock.acquire(blocking=False):
+            return {"checked": 0, "hidden": 0}
+        checked = hidden = 0
+        try:
+            with self._process_auto_lock() as acquired:
+                if not acquired:
+                    return {"checked": 0, "hidden": 0}
+                with self._lock:
+                    self._auto_last_cycle = _now().isoformat()
+                    self._auto_last_error = None
+                for item in self.candidates()["items"]:
+                    if checked >= max(0, max_checks) or self._auto_stop.is_set():
+                        break
+                    key = str(item["key"])
+                    age = item.get("seat_age_hours")
+                    # Never auto-delete classes with no proven historical seat update.
+                    # Missing-number errors alone can flag a class for MANUAL review,
+                    # but cannot bypass the 48h automatic deletion threshold.
+                    if age is None or age < self.stale_hours or item.get("crosslisted"):
+                        continue
+                    with self._lock:
+                        last = self._auto_attempts.get(key)
+                        if last is not None and time.monotonic() - last < AUTO_RETRY_SECONDS:
+                            continue
+                        sections = self._physical_sections().get(key, [])
+                        if not sections or key in self._ignored or self._states.get(key, {}).get('status') == 'checking':
+                            continue
+                        # Do not interrupt an administrator's existing verification.
+                        if any(st.get('status') == 'checking' for st in self._states.values()):
+                            break
+                        self._auto_attempts[key] = time.monotonic()
+                        self._states[key] = {"status": "checking"}
+                        section = sections[0]
+                    checked += 1
+                    try:
+                        if not self.data_path.is_file():
+                            raise ValueError('Active dataset missing; automatic deletion disabled.')
+                        original_digest = hashlib.sha256(self.data_path.read_bytes()).digest()
+                        self._verify(key, section)  # two independent complete live checks
+                        with self._lock:
+                            status = self._states.get(key, {}).get('status')
+                        if status != 'confirmed_missing':
+                            continue
+                        # A rescrape or other admin mutation while checking invalidates
+                        # this verification, even if the class IDs happen to be the same.
+                        if hashlib.sha256(self.data_path.read_bytes()).digest() != original_digest:
+                            raise ValueError('Dataset changed during live verification; no class hidden.')
+                        result = self.hide_confirmed(key)
+                        hidden += 1
+                        with self._lock:
+                            self._auto_deletions.appendleft({
+                                "term": result["term"], "course_code": result["course_code"],
+                                "class_number": result["class_number"], "hidden_at": _now().isoformat(),
+                            })
+                        LOG.warning('automatic_class_hidden term=%s course=%s class=%s',
+                                    result['term'], result['course_code'], result['class_number'])
+                    except Exception as exc:
+                        detail = f'{type(exc).__name__}: {exc}'[:350]
+                        with self._lock:
+                            self._auto_last_error = detail
+                            self._states[key] = {"status": "inconclusive", "error": detail}
+                        LOG.exception('automatic_class_hide_skipped class=%s', key)
+        finally:
+            self._auto_lock.release()
+        return {"checked": checked, "hidden": hidden}
+
+    def _auto_run(self) -> None:
+        if self._auto_stop.wait(AUTO_INITIAL_SECONDS):
+            return
+        while not self._auto_stop.is_set():
+            try:
+                self.auto_cycle()
+            except Exception as exc:
+                LOG.exception('automatic_class_removal_cycle_failed')
+                with self._lock:
+                    self._auto_last_error = f'{type(exc).__name__}: {exc}'[:350]
+            if self._auto_stop.wait(AUTO_CYCLE_SECONDS):
+                break
+
+    def start_auto(self) -> None:
+        with self._lock:
+            if self._auto_thread and self._auto_thread.is_alive():
+                return
+            self._auto_stop.clear()
+            self._auto_thread = Thread(target=self._auto_run, daemon=True,
+                                       name='classcatalog-automatic-removal')
+            self._auto_thread.start()
+
+    def stop_auto(self) -> None:
+        self._auto_stop.set()
+        thread = self._auto_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+
     def dismiss(self, key: str) -> None:
         with self._lock:
             if key not in self._physical_sections():
@@ -300,61 +583,3 @@ class RemovalReviewService:
             self._ignored.add(key)
             self._states.pop(key, None)
 
-    def delete_confirmed(self, key: str) -> dict[str, object]:
-        with self._lock:
-            sections = self._physical_sections().get(key, [])
-            if not sections or not self._confirmation_valid(key, sections, _now()):
-                raise ValueError("A fresh, complete live confirmation is required before deletion.")
-            current_updates = [_datetime(s.seat_updated_at) for s in sections]
-            if any(updated and (_now() - updated).total_seconds() < self.stale_hours * 3600
-                   for updated in current_updates):
-                raise ValueError("A recent seat update was found; deletion must be verified again.")
-            if not self.data_path.is_file():
-                raise ValueError("Active on-disk dataset is missing. Deletion cancelled.")
-            original_bytes = self.data_path.read_bytes()
-            raw = json.loads(original_bytes)
-            if not isinstance(raw, list):
-                raise ValueError("Active dataset is not a JSON array.")
-            parsed = [CourseSection.model_validate(item) for item in raw]
-            group = [section for section in parsed if _key(section) == key]
-            if tuple(sorted(s.id for s in group)) != tuple(sorted(s.id for s in sections)):
-                raise ValueError("On-disk dataset differs from verified live records; verify again.")
-            remaining = [item for item, section in zip(raw, parsed) if _key(section) != key]
-            if not remaining:
-                raise ValueError("Refusing to empty the entire active catalog.")
-            updated_sections = tuple(s for s in self.repository.sections if _key(s) != key)
-            before_audit = self.repository.coverage_audit()
-            after_audit = CourseRepository(updated_sections, catalog=self.repository.catalog).coverage_audit()
-            if (after_audit.unaccounted_physical_sections > before_audit.unaccounted_physical_sections
-                    or after_audit.unaccounted_course_section_listings > before_audit.unaccounted_course_section_listings):
-                raise ValueError("Removal would create new orphaned class components. Use a full dataset review.")
-            # Write a restorable backup and atomically replace the data file.
-            if self.data_path.read_bytes() != original_bytes:
-                raise ValueError("Active dataset changed during verification; deletion cancelled.")
-            backup_dir = self.data_path.parent / "removal-backups"
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            backup = backup_dir / f"{self.data_path.stem}-before-removal-{uuid4().hex}.json"
-            shutil.copy2(self.data_path, backup)
-            # CLASSCATALOG_DELETED_HISTORY_V1: write a durable tombstone BEFORE
-            # removing the only record capable of identifying a future replacement.
-            # Fail closed if history storage is inaccessible or invalid. A failed
-            # dataset write compensates by removing the pending history entry.
-            # Archive exact, validated on-disk class records, not enriched runtime rows.
-            # Runtime catalog enrichment may alter requirement and program tags.
-            history_id = self.deleted_history.append_confirmed(group, backup)
-            temporary = self.data_path.with_name(f"{self.data_path.name}.{uuid4().hex}.tmp")
-            try:
-                temporary.write_text(json.dumps(remaining, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-                os.replace(temporary, self.data_path)
-            except BaseException:
-                self.deleted_history.undo_pending(history_id)
-                raise
-            finally:
-                temporary.unlink(missing_ok=True)
-            self.repository.replace_inventory(updated_sections)
-            self._prune_seat_refresh_after_deletion()
-            self._states.pop(key, None)
-            self._ignored.discard(key)
-            return {"deleted": True, "class_number": sections[0].schedule_number,
-                    "course_code": sections[0].course_code, "term": sections[0].term,
-                    "removed_listings": len(group), "backup_path": str(backup)}

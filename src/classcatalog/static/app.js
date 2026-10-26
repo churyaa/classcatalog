@@ -341,6 +341,34 @@ const completedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 const hideCompletedCoursesCookieName = "classcatalog_hide_completed_courses";
 const hideCompletedCoursesCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 const favoritesStorageKey = "classcatalog_favorites_v1";
+// CLASSCATALOG_VISIBILITY_OVERLAY_V1: fail closed for cached favorites until checked.
+let hiddenFavoriteKeys = null;
+async function refreshHiddenFavoriteVisibility() {
+  try {
+    const response = await fetchJson("/api/hidden-classes", { cache: "no-store" },
+      { fallbackMessage: "Class visibility could not be verified.", allowDetail: false });
+    const records = Array.isArray(response.hidden) ? response.hidden : [];
+    hiddenFavoriteKeys = new Set(records.flatMap((record) => [
+      String(record.key || ""),
+      `${String(record.term || "")}::${String(record.class_number || "")}`,
+    ]));
+    updateFavoritesCount();
+    if (window.location.hash === "#favorites") renderFavoritesPage();
+  } catch (_error) {
+    hiddenFavoriteKeys = null; // Do not display potentially removed cached records.
+    updateFavoritesCount();
+    if (window.location.hash === "#favorites") renderFavoritesPage();
+  }
+}
+
+function isHiddenFavoriteSection(section) {
+  if (!hiddenFavoriteKeys) return true;
+  const schedules = [section.schedule_number,
+    ...(section.linked_components || []).map((component) => component.schedule_number)];
+  return schedules.some((number) =>
+    hiddenFavoriteKeys.has(`${String(section.term_code || section.term || "")}::${number}`) ||
+    hiddenFavoriteKeys.has(`${String(section.term || "")}::${number}`));
+}
 
 function readFavorites() {
   try {
@@ -371,7 +399,7 @@ function sectionFavoriteKey(section) {
 }
 
 function favoriteSections() {
-  return Object.values(readFavorites()).filter((section) => section && section.course_code && section.schedule_number);
+  return Object.values(readFavorites()).filter((section) => section && section.course_code && section.schedule_number && !isHiddenFavoriteSection(section));
 }
 
 function isFavorite(section) {
@@ -2785,6 +2813,22 @@ async function loadRemovalReview() {
     const data = await fetchJson("/api/admin/removals", { cache: "no-store" },
       { fallbackMessage: "Flagged classes could not be loaded.", allowDetail: true });
     const items = Array.isArray(data.items) ? data.items : [];
+    // CLASSCATALOG_AUTOMATIC_REMOVAL_V1: show automatic deletion activity even after its row disappears.
+    const result = document.querySelector("#admin-removal-result");
+    const recent = Array.isArray(data.recent_auto_hides) ? data.recent_auto_hides : [];
+    if (result && recent.length && !result.textContent.includes("Dismissed")) {
+      const latest = recent[0];
+      result.className = "admin-seat-refresh-result is-success";
+      result.textContent = `Automatically hidden ${latest.course_code} class #${latest.class_number} (${latest.term}). Original dataset preserved.`;
+    }
+    // CLASSCATALOG_VISIBILITY_OVERLAY_V1: restore controls for confirmed hidden physical sections.
+    const hiddenBody = document.querySelector("#admin-removal-hidden-list");
+    const hiddenItems = Array.isArray(data.hidden_items) ? data.hidden_items : [];
+    if (hiddenBody) hiddenBody.innerHTML = hiddenItems.length ? hiddenItems.map((item) => {
+      const sourceLink = item.source_url
+        ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>` : "";
+      return `<tr data-removal-key="${escapeHtml(item.key)}"><td>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td><td>${escapeHtml(item.class_number)}</td><td>${escapeHtml(item.hidden_at)}</td><td><button class="admin-refresh" data-removal-action="unhide">Unhide class</button></td></tr>`;
+    }).join("") : '<tr><td colspan="4">No hidden classes.</td></tr>';
     tbody.innerHTML = items.length ? items.map((item) => {
       const label = `${item.term} · ${item.course_codes?.join(", ") || item.course_code}`;
       // CLASSCATALOG_REMOVAL_SOURCE_LINK_V1: official link mirrors Seat Refresh Failures.
@@ -2804,7 +2848,7 @@ async function loadRemovalReview() {
       const verify = !item.crosslisted && item.status !== "checking"
         ? `<button class="admin-refresh" data-removal-action="verify">Verify SDSU</button>` : "";
       const del = item.can_delete
-        ? `<button class="admin-refresh" data-removal-action="delete">Delete class</button>` : "";
+        ? `<button class="admin-refresh" data-removal-action="hide">Hide class</button>` : "";
       return `<tr data-removal-key="${escapeHtml(item.key)}">
         <td><strong>${escapeHtml(label)}</strong><small class="removal-evidence">${escapeHtml(evidence)}</small>${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td>
         <td>${escapeHtml(item.class_number)}</td>
@@ -2814,6 +2858,9 @@ async function loadRemovalReview() {
       </tr>`;
     }).join("") : '<tr><td colspan="5">No stale or suspicious classes found.</td></tr>';
     tbody.querySelectorAll("[data-removal-action]").forEach((button) => {
+      button.addEventListener("click", () => changeRemovalReview(button));
+    });
+    document.querySelectorAll("#admin-removal-hidden-list [data-removal-action]").forEach((button) => {
       button.addEventListener("click", () => changeRemovalReview(button));
     });
   } catch (err) {
@@ -2826,8 +2873,8 @@ async function changeRemovalReview(button) {
   const key = row?.dataset.removalKey;
   const action = button.dataset.removalAction;
   const result = document.querySelector("#admin-removal-result");
-  if (!key || !["verify", "delete", "dismiss"].includes(action)) return;
-  if (action === "delete" && !window.confirm(`Permanently remove physical class ${key} from the active dataset? A backup will be saved.`)) return;
+  if (!key || !["verify", "hide", "unhide", "dismiss"].includes(action)) return;
+  if (action === "hide" && !window.confirm(`Hide class ${key} from ClassCatalog? sections.json will be preserved.`)) return;
   button.disabled = true;
   try {
     const payload = await fetchJson(`/api/admin/removals/${action}`, {
@@ -2838,9 +2885,9 @@ async function changeRemovalReview(button) {
       result.className = "admin-seat-refresh-result is-success";
       result.textContent = action === "verify" ? "Fresh SDSU verification started. Results will appear here shortly."
         : action === "dismiss" ? `Dismissed ${key} until the server restarts.`
-        : `Removed ${key}. A backup was saved at ${payload.backup_path}.`;
+        : action === "hide" ? `Hidden ${key}. Original sections.json preserved.` : `Unhidden ${key}. Class restored to public listings.`;
     }
-    if (action === "delete") await loadAdminHealth();
+    if (action === "hide" || action === "unhide") { await loadAdminHealth(); await loadRemovalReview(); await refreshHiddenFavoriteVisibility(); }
     else await loadRemovalReview();
   } catch (err) {
     if (result) {
@@ -2848,145 +2895,6 @@ async function changeRemovalReview(button) {
       result.textContent = safeErrorMessage(err, "Removal action failed.");
     }
   } finally { if (button.isConnected) button.disabled = false; }
-}
-
-// CLASSCATALOG_MODIFIED_REVIEW_V1: manual SDSU class-detail review, never auto-applies.
-function renderModificationReview(data) {
-  const tbody = document.querySelector("#admin-modified-list");
-  const note = document.querySelector("#admin-modified-note");
-  const termSelect = document.querySelector("#admin-modified-term");
-  const scanButton = document.querySelector("#admin-modified-scan-button");
-  if (!tbody) return;
-  const terms = Array.isArray(data.available_terms) ? data.available_terms : [];
-  if (termSelect) {
-    const currentTerms = Array.from(termSelect.options).map((option) => option.value);
-    if (JSON.stringify(currentTerms) !== JSON.stringify(terms)) {
-      const selected = termSelect.value;
-      termSelect.replaceChildren();
-      terms.forEach((term) => {
-        const option = document.createElement("option");
-        option.value = term;
-        option.textContent = term;
-        termSelect.appendChild(option);
-      });
-      if (terms.includes(selected)) termSelect.value = selected;
-      else if (terms.some((term) => term.startsWith("Spring "))) termSelect.value = terms.find((term) => term.startsWith("Spring "));
-    }
-  }
-  const scan = data.scan || {};
-  if (scanButton) scanButton.disabled = Boolean(scan.running);
-  if (note) {
-    const details = scan.running
-      ? `Scanning ${scan.term || "semester"}: ${scan.scanned || 0} / ${scan.total || 0} course pages.`
-      : scan.total ? `Last scan: ${scan.scanned || 0} / ${scan.total} course pages; ${scan.errors || 0} error(s).` : "Choose a semester and scan. Verified one-to-one replacement sections are added automatically; existing-section modifications still require manual approval.";
-    note.textContent = `${details} ${scan.last_error ? `Latest scan error: ${scan.last_error}` : ""}`;
-  }
-  // CLASSCATALOG_REPLACEMENT_IMPORT_V1: show automatic additions and reasons for skips.
-  const replaceList = document.querySelector("#admin-replacement-list");
-  const replacements = Array.isArray(data.replacements) ? data.replacements : [];
-  if (replaceList) {
-    replaceList.innerHTML = replacements.length ? replacements.map((item) => {
-      const label = item.status === "added" ? "Automatically added" : item.status === "skipped" ? "Skipped (manual review)" : "Verification error";
-      const source = item.source_url
-        ? `<a href="${escapeHtml(item.source_url)}" rel="noopener noreferrer" target="_blank">Open SDSU Source</a>` : "";
-      return `<tr><td><strong>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}</strong><small class="modified-review-note">Old #${escapeHtml(item.old_class_number || "?")} → New #${escapeHtml(item.new_class_number || "Unconfirmed")}</small>${source ? `<small class="modified-review-note">${source}</small>` : ""}</td><td>${escapeHtml(label)}</td><td>${escapeHtml(item.detail || "")}</td></tr>`;
-    }).join("") : '<tr><td colspan="3">No replacement checks recorded yet. Run a Modified Classes scan to look for verified replacements.</td></tr>';
-  }
-  const items = Array.isArray(data.items) ? data.items : [];
-  tbody.innerHTML = items.length ? items.map((item) => {
-    const stateLabel = ({ verified: "Verified against live SDSU", needs_verification: "Review with a fresh SDSU check", checking: "Verifying…", inconclusive: "Inconclusive — retry", needs_reverification: "Outdated verification — retry" })[item.status] || "Needs verification";
-    const sourceLink = item.source_url
-      ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>` : "";
-    const changes = Object.entries(item.changes || {}).map(([field, difference]) =>
-      `<div class="modified-review-difference"><strong>${escapeHtml(field.replaceAll("_", " "))}</strong><span>${escapeHtml(difference.before || "Unknown")}</span><span aria-hidden="true">→</span><span>${escapeHtml(difference.after || "Unknown")}</span></div>`
-    ).join("");
-    const verify = !item.crosslisted && item.status !== "checking"
-      ? `<button class="admin-refresh" data-modified-action="verify" type="button">Verify SDSU</button>` : "";
-    const apply = item.can_apply
-      ? `<button class="admin-refresh" data-modified-action="apply" type="button">Apply changes</button>` : "";
-    return `<tr data-modified-key="${escapeHtml(item.key)}">
-      <td><strong>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}</strong>
-      <small class="modified-review-note">Class #${escapeHtml(item.class_number)}${item.crosslisted ? " · Cross-listed: manual reconciliation only" : ""}</small>
-      ${sourceLink ? `<small class="modified-review-note">${sourceLink}</small>` : ""}</td>
-      <td>${changes || "No verified changes"}</td>
-      <td><strong>${escapeHtml(stateLabel)}</strong>${item.error ? `<small class="modified-review-note">${escapeHtml(item.error)}</small>` : ""}</td>
-      <td><div class="modified-review-actions">${verify}${apply}<button class="admin-refresh" data-modified-action="dismiss" type="button">Dismiss</button></div></td>
-    </tr>`;
-  }).join("") : '<tr><td colspan="4">No modified classes flagged yet. Scan Spring or Summer to compare current SDSU details.</td></tr>';
-  tbody.querySelectorAll("[data-modified-action]").forEach((button) => {
-    button.addEventListener("click", () => changeModificationReview(button));
-  });
-}
-
-async function loadModificationReview() {
-  if (!state.adminAuthenticated || window.location.hash !== "#admin") return;
-  const tbody = document.querySelector("#admin-modified-list");
-  if (!tbody) return;
-  try {
-    const data = await fetchJson("/api/admin/modifications", { cache: "no-store" },
-      { fallbackMessage: "Modified classes could not be loaded.", allowDetail: true });
-    renderModificationReview(data);
-  } catch (error) {
-    tbody.innerHTML = `<tr><td colspan="4">${escapeHtml(safeErrorMessage(error, "Could not load modified classes."))}</td></tr>`;
-  }
-}
-
-async function startModificationScan(event) {
-  event.preventDefault();
-  const term = document.querySelector("#admin-modified-term")?.value || "";
-  const courseCode = document.querySelector("#admin-modified-course")?.value || "";
-  const button = document.querySelector("#admin-modified-scan-button");
-  const result = document.querySelector("#admin-modified-result");
-  if (!term || !button) return;
-  button.disabled = true;
-  try {
-    const payload = await fetchJson("/api/admin/modifications/scan", {
-      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ term, course_code: courseCode }),
-    }, { fallbackMessage: "Modified-class scan could not start.", allowDetail: true });
-    if (result) {
-      result.className = "admin-seat-refresh-result is-success";
-      result.textContent = `Started comparing ${payload.course_pages} SDSU course page(s). Results will appear in the queue.`;
-    }
-    await loadModificationReview();
-  } catch (error) {
-    if (result) {
-      result.className = "admin-seat-refresh-result is-error";
-      result.textContent = safeErrorMessage(error, "Modified-class scan could not start.");
-    }
-  } finally {
-    if (button.isConnected) button.disabled = false;
-  }
-}
-
-async function changeModificationReview(button) {
-  const key = button.closest("tr[data-modified-key]")?.dataset.modifiedKey;
-  const action = button.dataset.modifiedAction;
-  const result = document.querySelector("#admin-modified-result");
-  if (!key || !["verify", "apply", "dismiss"].includes(action)) return;
-  if (action === "apply" && !window.confirm(`Apply the verified SDSU schedule/professor changes to ${key}? A dataset backup will be saved.`)) return;
-  button.disabled = true;
-  try {
-    const payload = await fetchJson(`/api/admin/modifications/${action}`, {
-      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key }),
-    }, { fallbackMessage: "Modified-class action failed.", allowDetail: true });
-    if (result) {
-      result.className = "admin-seat-refresh-result is-success";
-      result.textContent = action === "verify" ? `Fresh SDSU verification started for ${key}.`
-        : action === "dismiss" ? `Dismissed ${key} until the server restarts.`
-        : `Applied ${key}. Backup saved at ${payload.backup_path}.`;
-    }
-    if (action === "apply") await loadAdminHealth();
-    else await loadModificationReview();
-  } catch (error) {
-    if (result) {
-      result.className = "admin-seat-refresh-result is-error";
-      result.textContent = safeErrorMessage(error, "Modified-class action failed.");
-    }
-  } finally {
-    if (button.isConnected) button.disabled = false;
-  }
 }
 
 function renderAdminHealth(data) {
@@ -3006,7 +2914,6 @@ function renderAdminHealth(data) {
   renderAdminOperations(data);
   renderAdminAnnouncementHistory();
   void loadRemovalReview();
-  void loadModificationReview();
 
   const seats = data?.seat_refresh || {};
   const seatMetrics = document.querySelector("#admin-seat-metrics");
@@ -4505,6 +4412,8 @@ function clearFilters() {
 
 async function boot() {
   setupThemePicker();
+  refreshHiddenFavoriteVisibility();
+  window.setInterval(refreshHiddenFavoriteVisibility, 60 * 1000);
   updateFavoritesCount();
   setupFilterFlyouts();
   syncPageFromHash();
@@ -4521,11 +4430,6 @@ async function boot() {
   if (adminProfessorRefreshForm) adminProfessorRefreshForm.addEventListener("submit", refreshOneProfessorRating);
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
-  const adminModifiedForm = document.querySelector("#admin-modified-form");
-  if (adminModifiedForm) adminModifiedForm.addEventListener("submit", startModificationScan);
-  window.setInterval(() => {
-    if (state.adminAuthenticated && window.location.hash === "#admin") void loadModificationReview();
-  }, 12000);
   setupAdminSeatCoursePicker();
   const removalRefresh = document.querySelector("#admin-removal-refresh");
   removalRefresh?.addEventListener("click", loadRemovalReview);

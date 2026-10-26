@@ -64,7 +64,6 @@ from classcatalog.repository import (
 from classcatalog.seo import SeoCatalog, SeoRenderer, build_sitemap_xml
 from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
 from classcatalog.removal_review import RemovalReviewService
-from classcatalog.modification_review import ModificationReviewService  # CLASSCATALOG_MODIFIED_REVIEW_V1
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOGGER = logging.getLogger(__name__)
@@ -102,13 +101,6 @@ class AdminSeatRefreshRequest(BaseModel):
 
 
 class AdminRemovalReviewRequest(BaseModel):
-    key: str = Field(min_length=3, max_length=128)
-
-class AdminModificationScanRequest(BaseModel):
-    term: str = Field(min_length=4, max_length=64)
-    course_code: str = Field(default='', max_length=32)
-
-class AdminModificationActionRequest(BaseModel):
     key: str = Field(min_length=3, max_length=128)
 
 
@@ -478,13 +470,22 @@ def create_app(
     removal_review = RemovalReviewService(
         active_repository, active_data_path, seat_service=active_seat_service,
     )
-    modification_review = ModificationReviewService(active_repository, active_data_path)
-    # CLASSCATALOG_REPLACEMENT_IMPORT_V1: refresh runtime views after safe automatic import.
-    def _after_replacement_installed() -> None:
+    # CLASSCATALOG_AUTOMATIC_REMOVAL_V1: enabled for the production/default repository. Tests with
+    # explicitly injected repositories remain opt-in; disable in deployment with
+    # CLASSCATALOG_AUTO_REMOVAL_ENABLED=0.
+    auto_removal_enabled = (
+        course_repository is None
+        and os.getenv("CLASSCATALOG_AUTO_REMOVAL_ENABLED", "1").strip().lower()
+        not in {"0", "false", "off", "disabled", "no"}
+    )
+
+    def _refresh_seo_after_removal() -> None:
         nonlocal seo_catalog
         seo_catalog = SeoCatalog.from_repository(active_repository)
-        removal_review._prune_seat_refresh_after_deletion()
-    modification_review.replacements.on_installed = _after_replacement_installed
+
+    removal_review.on_deleted = _refresh_seo_after_removal
+    # CLASSCATALOG_VISIBILITY_OVERLAY_V1: on startup, SEO must exclude hidden sections too.
+    seo_catalog = SeoCatalog.from_repository(active_repository)
     admin_sessions: dict[str, float] = {}
     failed_admin_logins: dict[str, list[float]] = {}
     ratings_refresh_lock = RLock()
@@ -631,9 +632,13 @@ def create_app(
     async def lifespan(_app: FastAPI):
         if active_seat_service is not None:
             active_seat_service.start()
+        if auto_removal_enabled:
+            removal_review.start_auto()
         try:
             yield
         finally:
+            if auto_removal_enabled:
+                removal_review.stop_auto()
             if active_seat_service is not None:
                 active_seat_service.stop()
 
@@ -1244,8 +1249,15 @@ def create_app(
             "queued_course_pages": queued,
         }
 
-    # CLASSCATALOG_REMOVAL_REVIEW_V1: read-only flags until an explicit,
-    # administrator-authorized delete after two complete live confirmations.
+    # CLASSCATALOG_VISIBILITY_OVERLAY_V1: administrator can verify, hide and unhide; never delete dataset rows.
+    @app.get("/api/hidden-classes")
+    async def public_hidden_classes(response: Response) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        return {"hidden": [
+            {"term": item["term"], "key": item["key"], "class_number": item["class_number"]}
+            for item in removal_review.hidden_items() if item["applied"]
+        ]}
+
     @app.get("/api/admin/removals")
     async def admin_removal_candidates(request: Request, response: Response) -> dict[str, object]:
         _require_admin(request)
@@ -1276,75 +1288,27 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"dismissed": True, "key": payload.key}
 
-    @app.post("/api/admin/removals/delete")
-    async def admin_delete_confirmed_removal(
+    @app.post("/api/admin/removals/hide")
+    async def admin_hide_confirmed_removal(
         payload: AdminRemovalReviewRequest, request: Request, response: Response,
     ) -> dict[str, object]:
-        nonlocal seo_catalog
         _require_admin(request)
         response.headers["Cache-Control"] = "no-store"
         try:
-            result = await run_in_threadpool(removal_review.delete_confirmed, payload.key)
-            seo_catalog = SeoCatalog.from_repository(active_repository)
+            return await run_in_threadpool(removal_review.hide_confirmed, payload.key)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return result
 
-    # CLASSCATALOG_MODIFIED_REVIEW_V1: all endpoints require Admin authentication.
-    @app.get("/api/admin/modifications")
-    async def admin_modification_candidates(request: Request, response: Response) -> dict[str, object]:
-        _require_admin(request)
-        response.headers["Cache-Control"] = "no-store"
-        return modification_review.overview()
-
-    @app.post("/api/admin/modifications/scan")
-    async def admin_scan_modifications(
-        payload: AdminModificationScanRequest, request: Request, response: Response,
+    @app.post("/api/admin/removals/unhide")
+    async def admin_unhide_removed_class(
+        payload: AdminRemovalReviewRequest, request: Request, response: Response,
     ) -> dict[str, object]:
         _require_admin(request)
         response.headers["Cache-Control"] = "no-store"
         try:
-            return modification_review.request_scan(payload.term, payload.course_code)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.post("/api/admin/modifications/verify")
-    async def admin_verify_modification(
-        payload: AdminModificationActionRequest, request: Request, response: Response,
-    ) -> dict[str, object]:
-        _require_admin(request)
-        response.headers["Cache-Control"] = "no-store"
-        try:
-            modification_review.request_verification(payload.key)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"accepted": True, "key": payload.key}
-
-    @app.post("/api/admin/modifications/dismiss")
-    async def admin_dismiss_modification(
-        payload: AdminModificationActionRequest, request: Request, response: Response,
-    ) -> dict[str, object]:
-        _require_admin(request)
-        response.headers["Cache-Control"] = "no-store"
-        try:
-            modification_review.dismiss(payload.key)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"dismissed": True, "key": payload.key}
-
-    @app.post("/api/admin/modifications/apply")
-    async def admin_apply_modification(
-        payload: AdminModificationActionRequest, request: Request, response: Response,
-    ) -> dict[str, object]:
-        nonlocal seo_catalog
-        _require_admin(request)
-        response.headers["Cache-Control"] = "no-store"
-        try:
-            result = await run_in_threadpool(modification_review.apply_verified, payload.key)
-            seo_catalog = SeoCatalog.from_repository(active_repository)
+            return await run_in_threadpool(removal_review.unhide, payload.key)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return result
 
     @app.get("/api/options", response_model=SearchOptions)
     async def options() -> SearchOptions:

@@ -43,7 +43,7 @@
       if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=67&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;modifiedreview=1">
+  <link rel="stylesheet" href="/static/styles.css?v=67&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
   <link rel="stylesheet" href="/static/legal.css?v=1">
   <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
   <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
@@ -607,7 +607,7 @@
             </div>
             <button id="admin-removal-refresh" class="admin-refresh" type="button">Refresh Flagged List</button>
           </div>
-          <p class="admin-note">Classes are flagged after 24 hours without a successful seat update, or when SDSU reports no matching class numbers. Verification performs two fresh SDSU searches. Nothing is deleted automatically.</p>
+          <p class="admin-note">Classes are flagged after 48 hours without a successful seat update or a missing-number error. The backend automatically hides eligible classes only after two complete SDSU checks. Original sections.json is never changed. Hidden classes can be restored below; uncertain or linked classes remain for review.</p>
           <p id="admin-removal-result" class="admin-seat-refresh-result" aria-live="polite"></p>
           <div class="admin-seat-failure-table-wrap">
             <table class="admin-seat-failure-table">
@@ -615,43 +615,13 @@
               <tbody id="admin-removal-list"><tr><td colspan="5">Loading flagged classes...</td></tr></tbody>
             </table>
           </div>
-        </section>
-
-        <!-- CLASSCATALOG_MODIFIED_REVIEW_V1: manual review of updated class details -->
-        <section class="admin-section" aria-labelledby="admin-modified-title">
-          <div class="admin-section-heading">
-            <div>
-              <p class="admin-kicker">Professor, meeting days/times, classroom and mode</p>
-              <h3 id="admin-modified-title">Modified classes</h3>
-            </div>
-          </div>
-          <p class="admin-note">Scan live SDSU course-information pages and compare each class number against the active semester. Select Verify SDSU to fetch the class's full current details before Apply becomes available. Existing-section modifications require manual approval; uniquely verified replacement sections are added automatically. A lightweight scan can miss complex multi-meeting changes.</p>
-          <form id="admin-modified-form" class="admin-seat-refresh-form">
-            <div class="admin-modified-controls">
-              <label for="admin-modified-term">Semester
-                <select id="admin-modified-term" data-no-search required></select>
-              </label>
-              <label for="admin-modified-course">Optional course code
-                <input id="admin-modified-course" type="text" placeholder="CS 574 (or leave blank for all)" maxlength="32" autocomplete="off" data-no-search>
-              </label>
-              <button id="admin-modified-scan-button" class="admin-refresh" type="submit">Scan for changes</button>
-            </div>
-          </form>
-          <p id="admin-modified-note" class="admin-note" aria-live="polite"></p>
-          <p id="admin-modified-result" class="admin-seat-refresh-result" aria-live="polite"></p>
-          <!-- CLASSCATALOG_REPLACEMENT_IMPORT_V1 -->
-          <h4>Automatically added replacement sections</h4>
-          <p class="admin-note">When an old class number disappears and exactly one new number appears under the same verified SDSU course, ClassCatalog checks the official subject/course twice, reads the new section details, and adds it to the dataset automatically. If the old class is still active, it remains in Possible Removed Classes; if already deleted, the saved deletion history can still be used for replacement discovery. Ambiguous/linked/cross-listed changes are skipped.</p>
+          <!-- CLASSCATALOG_VISIBILITY_OVERLAY_V1 -->
+          <h4>Hidden classes</h4>
+          <p class="admin-note">Verified hidden class records remain in sections.json and can be restored to the public website.</p>
           <div class="admin-seat-failure-table-wrap">
             <table class="admin-seat-failure-table">
-              <thead><tr><th scope="col">Semester / course</th><th scope="col">Result</th><th scope="col">Details</th></tr></thead>
-              <tbody id="admin-replacement-list"><tr><td colspan="3">No replacement scans yet.</td></tr></tbody>
-            </table>
-          </div>
-          <div class="admin-seat-failure-table-wrap">
-            <table class="admin-seat-failure-table">
-              <thead><tr><th scope="col">Semester / class</th><th scope="col">ClassCatalog → SDSU</th><th scope="col">Verification</th><th scope="col">Actions</th></tr></thead>
-              <tbody id="admin-modified-list"><tr><td colspan="4">Loading modified-class review queue...</td></tr></tbody>
+              <thead><tr><th>Semester / course</th><th>Class #</th><th>Hidden since</th><th>Action</th></tr></thead>
+              <tbody id="admin-removal-hidden-list"><tr><td colspan="4">Loading hidden classes...</td></tr></tbody>
             </table>
           </div>
         </section>
@@ -1374,7 +1344,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=74&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;modifiedreview=1&amp;replacementimport=1" defer></script>
+<script src="/static/app.js?v=74&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>
