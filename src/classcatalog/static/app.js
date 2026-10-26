@@ -671,8 +671,6 @@ async function deleteAdminAnnouncement(messageId, button) {
 
 const scheduleStorageKey = "classcatalog_schedule_v1";
 const scheduleWeekdayOrder = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const scheduleDefaultStartMinutes = 7 * 60;
-const scheduleDefaultEndMinutes = 22 * 60;
 
 function readSchedule() {
   try {
@@ -1139,7 +1137,7 @@ function scheduleCourseTint(courseCode) {
   String(courseCode || "").split("").forEach((character) => {
     hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
   });
-  return `${48 + Math.abs(hash % 28)}%`;
+  return `${10 + Math.abs(hash % 13)}%`;
 }
 
 function renderScheduleCalendar(sections) {
@@ -1159,70 +1157,6 @@ function renderScheduleCalendar(sections) {
   }
 
   const { timed, unscheduled } = scheduleMeetingEntries(sections);
-  const usedDays = new Set(timed.map((entry) => entry.day));
-  const visibleDays = scheduleWeekdayOrder.filter((day, index) => index < 5 || usedDays.has(day));
-  const startValues = timed.map((entry) => timeToMinutes(entry.meeting.start_time)).filter((value) => value != null);
-  const endValues = timed.map((entry) => timeToMinutes(entry.meeting.end_time)).filter((value) => value != null);
-  const startMinutes = startValues.length
-    ? Math.min(scheduleDefaultStartMinutes, Math.floor(Math.min(...startValues) / 60) * 60)
-    : scheduleDefaultStartMinutes;
-  const endMinutes = endValues.length
-    ? Math.max(scheduleDefaultEndMinutes, Math.ceil(Math.max(...endValues) / 60) * 60)
-    : scheduleDefaultEndMinutes;
-  const calendarHeight = Math.max(60, endMinutes - startMinutes);
-
-  const week = document.createElement("div");
-  week.className = "schedule-calendar-week";
-  week.style.setProperty("--schedule-day-count", String(visibleDays.length));
-  week.style.setProperty("--schedule-calendar-height", `${calendarHeight}px`);
-
-  const corner = document.createElement("div");
-  corner.className = "schedule-calendar-corner";
-  week.appendChild(corner);
-
-  visibleDays.forEach((day) => {
-    const header = document.createElement("div");
-    header.className = "schedule-day-header";
-    header.textContent = dayLabels[day] || day;
-    week.appendChild(header);
-  });
-
-  const axis = document.createElement("div");
-  axis.className = "schedule-time-axis";
-  axis.style.height = `${calendarHeight}px`;
-  for (let minute = startMinutes; minute < endMinutes; minute += 60) {
-    const label = document.createElement("span");
-    label.className = "schedule-time-label";
-    label.style.top = `${minute - startMinutes}px`;
-    label.textContent = formatTime(`${String(Math.floor(minute / 60)).padStart(2, "0")}:00`);
-    axis.appendChild(label);
-  }
-  week.appendChild(axis);
-
-  visibleDays.forEach((day) => {
-    const column = document.createElement("div");
-    column.className = "schedule-day-column";
-    column.style.height = `${calendarHeight}px`;
-    timed.filter((entry) => entry.day === day).forEach((entry) => {
-      const start = timeToMinutes(entry.meeting.start_time);
-      const end = timeToMinutes(entry.meeting.end_time);
-      const block = document.createElement("button");
-      block.type = "button";
-      block.className = "schedule-calendar-block";
-      block.style.top = `${Math.max(0, start - startMinutes)}px`;
-      block.style.height = `${Math.max(28, end - start)}px`;
-      block.style.setProperty("--schedule-tint", scheduleCourseTint(entry.section.course_code));
-      const componentLabel = entry.component.component || "";
-      block.innerHTML = `<strong>${escapeHtml(entry.section.course_code)}</strong>${componentLabel ? `<span>${escapeHtml(componentLabel)}</span>` : ""}<small>${escapeHtml(formatTime(entry.meeting.start_time))}–${escapeHtml(formatTime(entry.meeting.end_time))}</small>`;
-      block.setAttribute("aria-label", `Open ${entry.section.course_code} schedule details`);
-      block.addEventListener("click", () => openScheduleDetail(entry.key));
-      column.appendChild(block);
-    });
-    week.appendChild(column);
-  });
-
-  calendar.appendChild(week);
-
   unscheduledContainer.hidden = unscheduled.length === 0;
   if (unscheduled.length) {
     const heading = document.createElement("h3");
@@ -1241,6 +1175,78 @@ function renderScheduleCalendar(sections) {
     });
     unscheduledContainer.appendChild(list);
   }
+
+  // An all-asynchronous schedule does not need an empty hour grid.
+  if (!timed.length) {
+    calendar.hidden = true;
+    return;
+  }
+
+  const usedDays = new Set(timed.map((entry) => entry.day));
+  const visibleDays = scheduleWeekdayOrder.filter((day, index) => index < 5 || usedDays.has(day));
+  const startValues = timed.map((entry) => timeToMinutes(entry.meeting.start_time)).filter((value) => value != null);
+  const endValues = timed.map((entry) => timeToMinutes(entry.meeting.end_time)).filter((value) => value != null);
+  // Fit the grid to actual class hours with a one-hour margin on each side.
+  const startMinutes = Math.max(0, Math.floor(Math.min(...startValues) / 60) * 60 - 60);
+  const endMinutes = Math.min(24 * 60, Math.ceil(Math.max(...endValues) / 60) * 60 + 60);
+  const scheduleHourHeight = 50;
+  const pixelsPerMinute = scheduleHourHeight / 60;
+  const calendarHeight = Math.max(60, (endMinutes - startMinutes) * pixelsPerMinute);
+
+  const week = document.createElement("div");
+  week.className = "schedule-calendar-week";
+  week.style.setProperty("--schedule-day-count", String(visibleDays.length));
+  week.style.setProperty("--schedule-calendar-height", `${calendarHeight}px`);
+  week.style.setProperty("--schedule-hour-height", `${scheduleHourHeight}px`);
+
+  const corner = document.createElement("div");
+  corner.className = "schedule-calendar-corner";
+  week.appendChild(corner);
+
+  visibleDays.forEach((day) => {
+    const header = document.createElement("div");
+    header.className = "schedule-day-header";
+    header.textContent = dayLabels[day] || day;
+    week.appendChild(header);
+  });
+
+  const axis = document.createElement("div");
+  axis.className = "schedule-time-axis";
+  axis.style.height = `${calendarHeight}px`;
+  for (let minute = startMinutes; minute < endMinutes; minute += 60) {
+    const label = document.createElement("span");
+    label.className = "schedule-time-label";
+    label.style.top = `${(minute - startMinutes) * pixelsPerMinute}px`;
+    label.textContent = formatTime(`${String(Math.floor(minute / 60)).padStart(2, "0")}:00`);
+    axis.appendChild(label);
+  }
+  week.appendChild(axis);
+
+  visibleDays.forEach((day) => {
+    const column = document.createElement("div");
+    column.className = "schedule-day-column";
+    column.style.height = `${calendarHeight}px`;
+    timed.filter((entry) => entry.day === day).forEach((entry) => {
+      const start = timeToMinutes(entry.meeting.start_time);
+      const end = timeToMinutes(entry.meeting.end_time);
+      const block = document.createElement("button");
+      block.type = "button";
+      block.className = "schedule-calendar-block";
+      block.style.top = `${Math.max(0, start - startMinutes) * pixelsPerMinute}px`;
+      block.style.height = `${Math.max(22, (end - start) * pixelsPerMinute)}px`;
+      block.style.setProperty("--schedule-tint", scheduleCourseTint(entry.section.course_code));
+      const componentLabel = entry.component.component || "";
+      block.innerHTML = `<strong>${escapeHtml(entry.section.course_code)}</strong>${componentLabel ? `<span>${escapeHtml(componentLabel)}</span>` : ""}<small>${escapeHtml(formatTime(entry.meeting.start_time))}–${escapeHtml(formatTime(entry.meeting.end_time))}</small>`;
+      block.setAttribute("aria-label", `Open ${entry.section.course_code} schedule details`);
+      block.title = `${entry.section.course_code}${componentLabel ? ` · ${componentLabel}` : ""} · ${formatTime(entry.meeting.start_time)}–${formatTime(entry.meeting.end_time)}`;
+      block.addEventListener("click", () => openScheduleDetail(entry.key));
+      column.appendChild(block);
+    });
+    week.appendChild(column);
+  });
+
+  calendar.appendChild(week);
+
 }
 
 function renderScheduleDetail(section, key) {

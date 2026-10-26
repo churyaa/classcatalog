@@ -2316,6 +2316,8 @@ button:focus-visible {
   height: 100dvh;
   flex-direction: column;
   color: var(--theme-text);
+  --schedule-card-base: light-dark(#edf4fa, #27394d);
+  --schedule-card-ink: light-dark(#142a3f, #f8fbff);
   border-left: 1px solid var(--line);
   background: color-mix(in srgb, var(--theme-background) 94%, var(--theme-ui));
   box-shadow: -20px 0 55px color-mix(in srgb, var(--theme-text) 18%, transparent);
@@ -2489,9 +2491,9 @@ button:focus-visible {
     repeating-linear-gradient(
       to bottom,
       transparent 0,
-      transparent 59px,
-      color-mix(in srgb, var(--line) 68%, transparent) 59px,
-      color-mix(in srgb, var(--line) 68%, transparent) 60px
+      transparent calc(var(--schedule-hour-height) - 1px),
+      color-mix(in srgb, var(--line) 68%, transparent) calc(var(--schedule-hour-height) - 1px),
+      color-mix(in srgb, var(--line) 68%, transparent) var(--schedule-hour-height)
     ),
     var(--surface-soft);
 }
@@ -2508,10 +2510,10 @@ button:focus-visible {
   gap: .05rem;
   overflow: hidden;
   padding: .24rem .3rem;
-  border: 1px solid var(--theme-accent);
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 55%, var(--schedule-card-base));
   border-radius: .42rem;
-  color: var(--theme-text);
-  background: color-mix(in srgb, var(--theme-accent) var(--schedule-tint), var(--surface-raised));
+  color: var(--schedule-card-ink);
+  background: color-mix(in srgb, var(--theme-accent) var(--schedule-tint), var(--schedule-card-base));
   cursor: pointer;
   font: inherit;
   text-align: left;
@@ -2519,28 +2521,28 @@ button:focus-visible {
 .schedule-calendar-block:hover,
 .schedule-calendar-block:focus-visible {
   z-index: 4;
-  filter: brightness(1.04);
-  outline: 2px solid var(--theme-accent);
+  outline: 2px solid var(--schedule-card-ink);
   outline-offset: 1px;
 }
-.schedule-calendar-block strong { font-size: .67rem; line-height: 1.1; }
+.schedule-calendar-block strong { max-width: 100%; overflow: hidden; font-size: .73rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-calendar-block span,
-.schedule-calendar-block small { max-width: 100%; overflow: hidden; font-size: .55rem; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
-.schedule-unscheduled { margin-top: .8rem; padding: .78rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
+.schedule-calendar-block small { max-width: 100%; overflow: hidden; font-size: .6rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-unscheduled { margin-bottom: .75rem; padding: .78rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
 .schedule-unscheduled h3 { margin: 0 0 .55rem; font-size: .72rem; }
 .schedule-unscheduled-list { display: flex; flex-wrap: wrap; gap: .4rem; }
 .schedule-unscheduled-item {
   padding: .42rem .55rem;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 50%, var(--schedule-card-base));
   border-radius: .55rem;
-  color: var(--theme-text);
-  background: var(--surface-raised);
+  color: var(--schedule-card-ink);
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--schedule-card-base));
   cursor: pointer;
   font: inherit;
   font-size: .7rem;
-  font-weight: 800;
+  font-weight: 850;
 }
-.schedule-unscheduled-item:hover { border-color: var(--theme-accent); color: var(--theme-accent); }
+.schedule-unscheduled-item:hover,
+.schedule-unscheduled-item:focus-visible { outline: 2px solid var(--schedule-card-ink); outline-offset: 1px; }
 .schedule-add-button {
   min-height: 2.35rem;
   padding: .46rem .62rem;
