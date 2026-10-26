@@ -43,7 +43,7 @@
       if (savedTheme) document.documentElement.dataset.theme = savedTheme;
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=66&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
+  <link rel="stylesheet" href="/static/styles.css?v=67&amp;bellright=1&amp;inboxops=1&amp;header=3&amp;filters=5&amp;themes=10&amp;brandalign=2&amp;admintheme=1&amp;themrail=1&amp;library=3&amp;filterpopout=1&amp;daystates=1&amp;brandlogo=1&amp;schedule=1&amp;schedulelayout=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1">
   <link rel="stylesheet" href="/static/legal.css?v=1">
   <meta name="classcatalog-google-analytics-id" content="G-Y9SSE53RE6">
   <link rel="stylesheet" href="/static/cookie-consent.css?v=1">
@@ -596,6 +596,25 @@
             </table>
           </div>
           <p id="admin-seat-failure-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+        </section>
+
+        <!-- CLASSCATALOG_REMOVAL_REVIEW_V1: manual deletion review -->
+        <section class="admin-section" aria-labelledby="admin-removal-title">
+          <div class="admin-section-heading">
+            <div>
+              <p class="admin-kicker">Stale seat updates and missing class numbers</p>
+              <h3 id="admin-removal-title">Possible removed classes</h3>
+            </div>
+            <button id="admin-removal-refresh" class="admin-refresh" type="button">Refresh Flagged List</button>
+          </div>
+          <p class="admin-note">Classes are flagged after 24 hours without a successful seat update, or when SDSU reports no matching class numbers. Verification performs two fresh SDSU searches. Nothing is deleted automatically.</p>
+          <p id="admin-removal-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+          <div class="admin-seat-failure-table-wrap">
+            <table class="admin-seat-failure-table">
+              <thead><tr><th>Semester / course</th><th>Class #</th><th>Last seat update</th><th>Verification</th><th>Actions</th></tr></thead>
+              <tbody id="admin-removal-list"><tr><td colspan="5">Loading flagged classes...</td></tr></tbody>
+            </table>
+          </div>
         </section>
 
         <section class="admin-section" aria-labelledby="admin-coverage-title">
@@ -1316,7 +1335,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=73&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1" defer></script>
+<script src="/static/app.js?v=74&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>

@@ -3018,3 +3018,10 @@ button:focus-visible {
 .search-suggestions { top: calc(100% + .45rem); min-width: min(28rem, calc(100vw - 2rem)); }
 .search-suggestion strong { font-size: .8rem; }
 .search-suggestion span { color: var(--muted); font-size: .69rem; }
+
+/* CLASSCATALOG_REMOVAL_REVIEW_V1: compact manual-removal controls */
+#admin-removal-list td { font-size: .72rem; vertical-align: middle; }
+#admin-removal-list .removal-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+#admin-removal-list .removal-actions button { padding: .36rem .52rem; }
+#admin-removal-list .removal-evidence { display: block; color: var(--muted); font-size: .65rem; margin-top: .2rem; }
+#admin-removal-list .removal-confirmed { font-weight: 850; color: var(--theme-accent); }

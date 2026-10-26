@@ -276,6 +276,28 @@ class CourseRepository:
                 self._options = self._build_options()
         return len(changed_physical)
 
+    def replace_inventory(self, sections: tuple[CourseSection, ...]) -> None:
+        """Replace the in-memory inventory after a validated on-disk admin removal."""
+        with self._lock:
+            self._sections = tuple(sections)
+            self._sections_by_id = {item.id: item for item in self._sections}
+            self._embedded_professors = {
+                key: value for key, value in self._embedded_professors.items()
+                if key in self._sections_by_id
+            }
+            self._course_total = len({
+                (s.term_code or s.term, s.subject, s.crse_id or s.course_code,
+                 s.crse_offer_nbr or "", s.acad_career or "") for s in self._sections
+            })
+            self._physical_section_total = len({
+                (s.term_code or s.term, s.schedule_number) for s in self._sections
+            })
+            self._subject_total = len({s.subject for s in self._sections})
+            self._options = self._build_options()
+            self._group_cache = None
+            self._group_indices_by_section_id = None
+            self._sort_index_cache.clear()
+
     def seat_snapshot(
         self,
         schedule_numbers: Sequence[str] = (),

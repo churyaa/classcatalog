@@ -63,6 +63,7 @@ from classcatalog.repository import (
 )
 from classcatalog.seo import SeoCatalog, SeoRenderer, build_sitemap_xml
 from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
+from classcatalog.removal_review import RemovalReviewService
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOGGER = logging.getLogger(__name__)
@@ -97,6 +98,10 @@ class SeatInterestRequest(BaseModel):
 
 class AdminSeatRefreshRequest(BaseModel):
     course_code: str
+
+
+class AdminRemovalReviewRequest(BaseModel):
+    key: str = Field(min_length=3, max_length=128)
 
 
 class AdminProfessorOverrideRequest(BaseModel):
@@ -462,6 +467,9 @@ def create_app(
         and should_enable_seat_refresh
     ):
         active_seat_service = SeatRefreshService(active_repository)
+    removal_review = RemovalReviewService(
+        active_repository, active_data_path, seat_service=active_seat_service,
+    )
     admin_sessions: dict[str, float] = {}
     failed_admin_logins: dict[str, list[float]] = {}
     ratings_refresh_lock = RLock()
@@ -1220,6 +1228,52 @@ def create_app(
             "course_code": course_code,
             "queued_course_pages": queued,
         }
+
+    # CLASSCATALOG_REMOVAL_REVIEW_V1: read-only flags until an explicit,
+    # administrator-authorized delete after two complete live confirmations.
+    @app.get("/api/admin/removals")
+    async def admin_removal_candidates(request: Request, response: Response) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        return removal_review.candidates()
+
+    @app.post("/api/admin/removals/verify")
+    async def admin_verify_removal(
+        payload: AdminRemovalReviewRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            removal_review.request_verification(payload.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"accepted": True, "key": payload.key}
+
+    @app.post("/api/admin/removals/dismiss")
+    async def admin_dismiss_removal(
+        payload: AdminRemovalReviewRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            removal_review.dismiss(payload.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"dismissed": True, "key": payload.key}
+
+    @app.post("/api/admin/removals/delete")
+    async def admin_delete_confirmed_removal(
+        payload: AdminRemovalReviewRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        nonlocal seo_catalog
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            result = await run_in_threadpool(removal_review.delete_confirmed, payload.key)
+            seo_catalog = SeoCatalog.from_repository(active_repository)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return result
 
     @app.get("/api/options", response_model=SearchOptions)
     async def options() -> SearchOptions:

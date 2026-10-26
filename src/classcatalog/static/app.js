@@ -2776,6 +2776,80 @@ function renderAdminOperations(data) {
   }
 }
 
+// CLASSCATALOG_REMOVAL_REVIEW_V1: deletion is never automatic.
+async function loadRemovalReview() {
+  if (!state.adminAuthenticated || window.location.hash !== "#admin") return;
+  const tbody = document.querySelector("#admin-removal-list");
+  if (!tbody) return;
+  try {
+    const data = await fetchJson("/api/admin/removals", { cache: "no-store" },
+      { fallbackMessage: "Flagged classes could not be loaded.", allowDetail: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    tbody.innerHTML = items.length ? items.map((item) => {
+      const label = `${item.term} · ${item.course_codes?.join(", ") || item.course_code}`;
+      // CLASSCATALOG_REMOVAL_SOURCE_LINK_V1: official link mirrors Seat Refresh Failures.
+      const sourceLink = item.source_url
+        ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>`
+        : "";
+      const evidence = item.missing_class_number_failure
+        ? "Missing expected class numbers in recent seat refresh"
+        : "Stale seat update";
+      const age = item.seat_age_hours == null ? "Never updated" : `${Math.round(item.seat_age_hours)} hours ago`;
+      const status = item.crosslisted ? "Cross-listed: review separately"
+        : item.status === "confirmed_missing" ? "Confirmed missing (2 checks)"
+        : item.status === "checking" ? "Checking SDSU…"
+        : item.status === "still_present" ? "Still listed on SDSU"
+        : item.status === "inconclusive" ? "Inconclusive — retry"
+        : item.status === "suspected" ? "Suspected removal" : "Needs verification";
+      const verify = !item.crosslisted && item.status !== "checking"
+        ? `<button class="admin-refresh" data-removal-action="verify">Verify SDSU</button>` : "";
+      const del = item.can_delete
+        ? `<button class="admin-refresh" data-removal-action="delete">Delete class</button>` : "";
+      return `<tr data-removal-key="${escapeHtml(item.key)}">
+        <td><strong>${escapeHtml(label)}</strong><small class="removal-evidence">${escapeHtml(evidence)}</small>${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td>
+        <td>${escapeHtml(item.class_number)}</td>
+        <td>${escapeHtml(age)}</td>
+        <td><span class="${item.can_delete ? "removal-confirmed" : ""}">${escapeHtml(status)}</span>${item.error ? `<small class="removal-evidence">${escapeHtml(item.error)}</small>` : ""}</td>
+        <td><div class="removal-actions">${verify}${del}<button class="admin-refresh" data-removal-action="dismiss">Dismiss</button></div></td>
+      </tr>`;
+    }).join("") : '<tr><td colspan="5">No stale or suspicious classes found.</td></tr>';
+    tbody.querySelectorAll("[data-removal-action]").forEach((button) => {
+      button.addEventListener("click", () => changeRemovalReview(button));
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5">${escapeHtml(safeErrorMessage(err, "Unable to load flagged classes."))}</td></tr>`;
+  }
+}
+
+async function changeRemovalReview(button) {
+  const row = button.closest("tr[data-removal-key]");
+  const key = row?.dataset.removalKey;
+  const action = button.dataset.removalAction;
+  const result = document.querySelector("#admin-removal-result");
+  if (!key || !["verify", "delete", "dismiss"].includes(action)) return;
+  if (action === "delete" && !window.confirm(`Permanently remove physical class ${key} from the active dataset? A backup will be saved.`)) return;
+  button.disabled = true;
+  try {
+    const payload = await fetchJson(`/api/admin/removals/${action}`, {
+      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    }, { fallbackMessage: "Removal action failed.", allowDetail: true });
+    if (result) {
+      result.className = "admin-seat-refresh-result is-success";
+      result.textContent = action === "verify" ? "Fresh SDSU verification started. Results will appear here shortly."
+        : action === "dismiss" ? `Dismissed ${key} until the server restarts.`
+        : `Removed ${key}. A backup was saved at ${payload.backup_path}.`;
+    }
+    if (action === "delete") await loadAdminHealth();
+    else await loadRemovalReview();
+  } catch (err) {
+    if (result) {
+      result.className = "admin-seat-refresh-result is-error";
+      result.textContent = safeErrorMessage(err, "Removal action failed.");
+    }
+  } finally { if (button.isConnected) button.disabled = false; }
+}
+
 function renderAdminHealth(data) {
   state.adminHealth = data;
   const dashboard = document.querySelector("#admin-dashboard");
@@ -2792,6 +2866,7 @@ function renderAdminHealth(data) {
 
   renderAdminOperations(data);
   renderAdminAnnouncementHistory();
+  void loadRemovalReview();
 
   const seats = data?.seat_refresh || {};
   const seatMetrics = document.querySelector("#admin-seat-metrics");
@@ -4307,6 +4382,11 @@ async function boot() {
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
   setupAdminSeatCoursePicker();
+  const removalRefresh = document.querySelector("#admin-removal-refresh");
+  removalRefresh?.addEventListener("click", loadRemovalReview);
+  window.setInterval(() => {
+    if (state.adminAuthenticated && window.location.hash === "#admin") void loadRemovalReview();
+  }, 12000);
   const adminProfessorOverrideForm = document.querySelector("#admin-professor-override-form");
   if (adminProfessorOverrideForm) adminProfessorOverrideForm.addEventListener("submit", saveAdminProfessorOverride);
   setupAdminProfessorPicker();
