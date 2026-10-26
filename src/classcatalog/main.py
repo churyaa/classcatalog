@@ -64,6 +64,7 @@ from classcatalog.repository import (
 from classcatalog.seo import SeoCatalog, SeoRenderer, build_sitemap_xml
 from classcatalog.seats import SeatRefreshService, seat_refresh_env_enabled
 from classcatalog.removal_review import RemovalReviewService
+from classcatalog.modification_review import ModificationReviewService  # CLASSCATALOG_MODIFIED_REVIEW_V1
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOGGER = logging.getLogger(__name__)
@@ -101,6 +102,13 @@ class AdminSeatRefreshRequest(BaseModel):
 
 
 class AdminRemovalReviewRequest(BaseModel):
+    key: str = Field(min_length=3, max_length=128)
+
+class AdminModificationScanRequest(BaseModel):
+    term: str = Field(min_length=4, max_length=64)
+    course_code: str = Field(default='', max_length=32)
+
+class AdminModificationActionRequest(BaseModel):
     key: str = Field(min_length=3, max_length=128)
 
 
@@ -470,6 +478,13 @@ def create_app(
     removal_review = RemovalReviewService(
         active_repository, active_data_path, seat_service=active_seat_service,
     )
+    modification_review = ModificationReviewService(active_repository, active_data_path)
+    # CLASSCATALOG_REPLACEMENT_IMPORT_V1: refresh runtime views after safe automatic import.
+    def _after_replacement_installed() -> None:
+        nonlocal seo_catalog
+        seo_catalog = SeoCatalog.from_repository(active_repository)
+        removal_review._prune_seat_refresh_after_deletion()
+    modification_review.replacements.on_installed = _after_replacement_installed
     admin_sessions: dict[str, float] = {}
     failed_admin_logins: dict[str, list[float]] = {}
     ratings_refresh_lock = RLock()
@@ -1270,6 +1285,62 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         try:
             result = await run_in_threadpool(removal_review.delete_confirmed, payload.key)
+            seo_catalog = SeoCatalog.from_repository(active_repository)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return result
+
+    # CLASSCATALOG_MODIFIED_REVIEW_V1: all endpoints require Admin authentication.
+    @app.get("/api/admin/modifications")
+    async def admin_modification_candidates(request: Request, response: Response) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        return modification_review.overview()
+
+    @app.post("/api/admin/modifications/scan")
+    async def admin_scan_modifications(
+        payload: AdminModificationScanRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return modification_review.request_scan(payload.term, payload.course_code)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/admin/modifications/verify")
+    async def admin_verify_modification(
+        payload: AdminModificationActionRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            modification_review.request_verification(payload.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"accepted": True, "key": payload.key}
+
+    @app.post("/api/admin/modifications/dismiss")
+    async def admin_dismiss_modification(
+        payload: AdminModificationActionRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            modification_review.dismiss(payload.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"dismissed": True, "key": payload.key}
+
+    @app.post("/api/admin/modifications/apply")
+    async def admin_apply_modification(
+        payload: AdminModificationActionRequest, request: Request, response: Response,
+    ) -> dict[str, object]:
+        nonlocal seo_catalog
+        _require_admin(request)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            result = await run_in_threadpool(modification_review.apply_verified, payload.key)
             seo_catalog = SeoCatalog.from_repository(active_repository)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

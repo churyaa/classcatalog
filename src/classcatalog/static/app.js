@@ -2850,6 +2850,145 @@ async function changeRemovalReview(button) {
   } finally { if (button.isConnected) button.disabled = false; }
 }
 
+// CLASSCATALOG_MODIFIED_REVIEW_V1: manual SDSU class-detail review, never auto-applies.
+function renderModificationReview(data) {
+  const tbody = document.querySelector("#admin-modified-list");
+  const note = document.querySelector("#admin-modified-note");
+  const termSelect = document.querySelector("#admin-modified-term");
+  const scanButton = document.querySelector("#admin-modified-scan-button");
+  if (!tbody) return;
+  const terms = Array.isArray(data.available_terms) ? data.available_terms : [];
+  if (termSelect) {
+    const currentTerms = Array.from(termSelect.options).map((option) => option.value);
+    if (JSON.stringify(currentTerms) !== JSON.stringify(terms)) {
+      const selected = termSelect.value;
+      termSelect.replaceChildren();
+      terms.forEach((term) => {
+        const option = document.createElement("option");
+        option.value = term;
+        option.textContent = term;
+        termSelect.appendChild(option);
+      });
+      if (terms.includes(selected)) termSelect.value = selected;
+      else if (terms.some((term) => term.startsWith("Spring "))) termSelect.value = terms.find((term) => term.startsWith("Spring "));
+    }
+  }
+  const scan = data.scan || {};
+  if (scanButton) scanButton.disabled = Boolean(scan.running);
+  if (note) {
+    const details = scan.running
+      ? `Scanning ${scan.term || "semester"}: ${scan.scanned || 0} / ${scan.total || 0} course pages.`
+      : scan.total ? `Last scan: ${scan.scanned || 0} / ${scan.total} course pages; ${scan.errors || 0} error(s).` : "Choose a semester and scan. Verified one-to-one replacement sections are added automatically; existing-section modifications still require manual approval.";
+    note.textContent = `${details} ${scan.last_error ? `Latest scan error: ${scan.last_error}` : ""}`;
+  }
+  // CLASSCATALOG_REPLACEMENT_IMPORT_V1: show automatic additions and reasons for skips.
+  const replaceList = document.querySelector("#admin-replacement-list");
+  const replacements = Array.isArray(data.replacements) ? data.replacements : [];
+  if (replaceList) {
+    replaceList.innerHTML = replacements.length ? replacements.map((item) => {
+      const label = item.status === "added" ? "Automatically added" : item.status === "skipped" ? "Skipped (manual review)" : "Verification error";
+      const source = item.source_url
+        ? `<a href="${escapeHtml(item.source_url)}" rel="noopener noreferrer" target="_blank">Open SDSU Source</a>` : "";
+      return `<tr><td><strong>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}</strong><small class="modified-review-note">Old #${escapeHtml(item.old_class_number || "?")} → New #${escapeHtml(item.new_class_number || "Unconfirmed")}</small>${source ? `<small class="modified-review-note">${source}</small>` : ""}</td><td>${escapeHtml(label)}</td><td>${escapeHtml(item.detail || "")}</td></tr>`;
+    }).join("") : '<tr><td colspan="3">No replacement checks recorded yet. Run a Modified Classes scan to look for verified replacements.</td></tr>';
+  }
+  const items = Array.isArray(data.items) ? data.items : [];
+  tbody.innerHTML = items.length ? items.map((item) => {
+    const stateLabel = ({ verified: "Verified against live SDSU", needs_verification: "Review with a fresh SDSU check", checking: "Verifying…", inconclusive: "Inconclusive — retry", needs_reverification: "Outdated verification — retry" })[item.status] || "Needs verification";
+    const sourceLink = item.source_url
+      ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>` : "";
+    const changes = Object.entries(item.changes || {}).map(([field, difference]) =>
+      `<div class="modified-review-difference"><strong>${escapeHtml(field.replaceAll("_", " "))}</strong><span>${escapeHtml(difference.before || "Unknown")}</span><span aria-hidden="true">→</span><span>${escapeHtml(difference.after || "Unknown")}</span></div>`
+    ).join("");
+    const verify = !item.crosslisted && item.status !== "checking"
+      ? `<button class="admin-refresh" data-modified-action="verify" type="button">Verify SDSU</button>` : "";
+    const apply = item.can_apply
+      ? `<button class="admin-refresh" data-modified-action="apply" type="button">Apply changes</button>` : "";
+    return `<tr data-modified-key="${escapeHtml(item.key)}">
+      <td><strong>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}</strong>
+      <small class="modified-review-note">Class #${escapeHtml(item.class_number)}${item.crosslisted ? " · Cross-listed: manual reconciliation only" : ""}</small>
+      ${sourceLink ? `<small class="modified-review-note">${sourceLink}</small>` : ""}</td>
+      <td>${changes || "No verified changes"}</td>
+      <td><strong>${escapeHtml(stateLabel)}</strong>${item.error ? `<small class="modified-review-note">${escapeHtml(item.error)}</small>` : ""}</td>
+      <td><div class="modified-review-actions">${verify}${apply}<button class="admin-refresh" data-modified-action="dismiss" type="button">Dismiss</button></div></td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="4">No modified classes flagged yet. Scan Spring or Summer to compare current SDSU details.</td></tr>';
+  tbody.querySelectorAll("[data-modified-action]").forEach((button) => {
+    button.addEventListener("click", () => changeModificationReview(button));
+  });
+}
+
+async function loadModificationReview() {
+  if (!state.adminAuthenticated || window.location.hash !== "#admin") return;
+  const tbody = document.querySelector("#admin-modified-list");
+  if (!tbody) return;
+  try {
+    const data = await fetchJson("/api/admin/modifications", { cache: "no-store" },
+      { fallbackMessage: "Modified classes could not be loaded.", allowDetail: true });
+    renderModificationReview(data);
+  } catch (error) {
+    tbody.innerHTML = `<tr><td colspan="4">${escapeHtml(safeErrorMessage(error, "Could not load modified classes."))}</td></tr>`;
+  }
+}
+
+async function startModificationScan(event) {
+  event.preventDefault();
+  const term = document.querySelector("#admin-modified-term")?.value || "";
+  const courseCode = document.querySelector("#admin-modified-course")?.value || "";
+  const button = document.querySelector("#admin-modified-scan-button");
+  const result = document.querySelector("#admin-modified-result");
+  if (!term || !button) return;
+  button.disabled = true;
+  try {
+    const payload = await fetchJson("/api/admin/modifications/scan", {
+      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ term, course_code: courseCode }),
+    }, { fallbackMessage: "Modified-class scan could not start.", allowDetail: true });
+    if (result) {
+      result.className = "admin-seat-refresh-result is-success";
+      result.textContent = `Started comparing ${payload.course_pages} SDSU course page(s). Results will appear in the queue.`;
+    }
+    await loadModificationReview();
+  } catch (error) {
+    if (result) {
+      result.className = "admin-seat-refresh-result is-error";
+      result.textContent = safeErrorMessage(error, "Modified-class scan could not start.");
+    }
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
+async function changeModificationReview(button) {
+  const key = button.closest("tr[data-modified-key]")?.dataset.modifiedKey;
+  const action = button.dataset.modifiedAction;
+  const result = document.querySelector("#admin-modified-result");
+  if (!key || !["verify", "apply", "dismiss"].includes(action)) return;
+  if (action === "apply" && !window.confirm(`Apply the verified SDSU schedule/professor changes to ${key}? A dataset backup will be saved.`)) return;
+  button.disabled = true;
+  try {
+    const payload = await fetchJson(`/api/admin/modifications/${action}`, {
+      method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    }, { fallbackMessage: "Modified-class action failed.", allowDetail: true });
+    if (result) {
+      result.className = "admin-seat-refresh-result is-success";
+      result.textContent = action === "verify" ? `Fresh SDSU verification started for ${key}.`
+        : action === "dismiss" ? `Dismissed ${key} until the server restarts.`
+        : `Applied ${key}. Backup saved at ${payload.backup_path}.`;
+    }
+    if (action === "apply") await loadAdminHealth();
+    else await loadModificationReview();
+  } catch (error) {
+    if (result) {
+      result.className = "admin-seat-refresh-result is-error";
+      result.textContent = safeErrorMessage(error, "Modified-class action failed.");
+    }
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+
 function renderAdminHealth(data) {
   state.adminHealth = data;
   const dashboard = document.querySelector("#admin-dashboard");
@@ -2867,6 +3006,7 @@ function renderAdminHealth(data) {
   renderAdminOperations(data);
   renderAdminAnnouncementHistory();
   void loadRemovalReview();
+  void loadModificationReview();
 
   const seats = data?.seat_refresh || {};
   const seatMetrics = document.querySelector("#admin-seat-metrics");
@@ -4381,6 +4521,11 @@ async function boot() {
   if (adminProfessorRefreshForm) adminProfessorRefreshForm.addEventListener("submit", refreshOneProfessorRating);
   const adminSeatRefreshForm = document.querySelector("#admin-seat-refresh-form");
   if (adminSeatRefreshForm) adminSeatRefreshForm.addEventListener("submit", refreshSpecificCourseSeats);
+  const adminModifiedForm = document.querySelector("#admin-modified-form");
+  if (adminModifiedForm) adminModifiedForm.addEventListener("submit", startModificationScan);
+  window.setInterval(() => {
+    if (state.adminAuthenticated && window.location.hash === "#admin") void loadModificationReview();
+  }, 12000);
   setupAdminSeatCoursePicker();
   const removalRefresh = document.querySelector("#admin-removal-refresh");
   removalRefresh?.addEventListener("click", loadRemovalReview);

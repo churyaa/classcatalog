@@ -19,6 +19,7 @@ from uuid import uuid4
 
 from classcatalog.models import CourseSection
 from classcatalog.repository import CourseRepository
+from classcatalog.deleted_history import DeletedClassHistory  # CLASSCATALOG_DELETED_HISTORY_V1
 from classcatalog.seats import is_course_info_url  # CLASSCATALOG_REMOVAL_SOURCE_LINK_V1
 from classcatalog.scraping.parser import parse_course_info_page
 from classcatalog.scraping.session import SdsuHttpConfig, SdsuPeopleSoftSession
@@ -61,6 +62,7 @@ class RemovalReviewService:
         self.repository = repository
         self.data_path = data_path
         self.seat_service = seat_service
+        self.deleted_history = DeletedClassHistory(data_path)
         self.probe = probe or self._probe_live
         self.stale_hours = stale_hours
         self._lock = RLock()
@@ -333,10 +335,20 @@ class RemovalReviewService:
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup = backup_dir / f"{self.data_path.stem}-before-removal-{uuid4().hex}.json"
             shutil.copy2(self.data_path, backup)
+            # CLASSCATALOG_DELETED_HISTORY_V1: write a durable tombstone BEFORE
+            # removing the only record capable of identifying a future replacement.
+            # Fail closed if history storage is inaccessible or invalid. A failed
+            # dataset write compensates by removing the pending history entry.
+            # Archive exact, validated on-disk class records, not enriched runtime rows.
+            # Runtime catalog enrichment may alter requirement and program tags.
+            history_id = self.deleted_history.append_confirmed(group, backup)
             temporary = self.data_path.with_name(f"{self.data_path.name}.{uuid4().hex}.tmp")
             try:
                 temporary.write_text(json.dumps(remaining, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                 os.replace(temporary, self.data_path)
+            except BaseException:
+                self.deleted_history.undo_pending(history_id)
+                raise
             finally:
                 temporary.unlink(missing_ok=True)
             self.repository.replace_inventory(updated_sections)
