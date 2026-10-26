@@ -82,6 +82,7 @@ class RemovalReviewService:
         self._auto_deletions: deque[dict[str, object]] = deque(maxlen=25)
         self._auto_last_cycle: str | None = None
         self._auto_last_error: str | None = None
+        self._auto_current: dict[str, object] | None = None  # CLASSCATALOG_REMOVAL_ACTIVITY_V1
         self.on_deleted: Callable[[], None] | None = None
         # CLASSCATALOG_VISIBILITY_OVERLAY_V1: persistent visibility (never edit sections.json).
         self._visibility_path = data_path.with_name('hidden_classes.json')
@@ -159,6 +160,7 @@ class RemovalReviewService:
                     "auto_interval_minutes": AUTO_CYCLE_SECONDS // 60,
                     "auto_last_cycle": self._auto_last_cycle,
                     "auto_last_error": self._auto_last_error,
+                    "auto_current": dict(self._auto_current) if self._auto_current else None,
                     "hidden_items": self.hidden_items(),
                     "recent_auto_hides": list(self._auto_deletions)}
 
@@ -420,6 +422,7 @@ class RemovalReviewService:
             return {"hidden": True, "term": record["term"],
                     "course_code": record["course_code"],
                     "class_number": record["class_number"],
+                    "hidden_at": record["hidden_at"],
                     "visibility_path": str(self._visibility_path)}
 
     def unhide(self, key: str) -> dict[str, object]:
@@ -515,6 +518,13 @@ class RemovalReviewService:
                         self._auto_attempts[key] = time.monotonic()
                         self._states[key] = {"status": "checking"}
                         section = sections[0]
+                        # CLASSCATALOG_REMOVAL_ACTIVITY_V1: show exactly which candidate is in progress.
+                        self._auto_current = {
+                            "key": key, "term": section.term,
+                            "course_code": section.course_code,
+                            "class_number": section.schedule_number,
+                            "phase": "verifying", "started_at": _now().isoformat(),
+                        }
                     checked += 1
                     try:
                         if not self.data_path.is_file():
@@ -529,6 +539,9 @@ class RemovalReviewService:
                         # this verification, even if the class IDs happen to be the same.
                         if hashlib.sha256(self.data_path.read_bytes()).digest() != original_digest:
                             raise ValueError('Dataset changed during live verification; no class hidden.')
+                        with self._lock:
+                            if self._auto_current and self._auto_current.get("key") == key:
+                                self._auto_current["phase"] = "hiding"
                         result = self.hide_confirmed(key)
                         hidden += 1
                         with self._lock:
@@ -544,7 +557,13 @@ class RemovalReviewService:
                             self._auto_last_error = detail
                             self._states[key] = {"status": "inconclusive", "error": detail}
                         LOG.exception('automatic_class_hide_skipped class=%s', key)
+                    finally:
+                        with self._lock:
+                            if self._auto_current and self._auto_current.get('key') == key:
+                                self._auto_current = None
         finally:
+            with self._lock:
+                self._auto_current = None
             self._auto_lock.release()
         return {"checked": checked, "hidden": hidden}
 

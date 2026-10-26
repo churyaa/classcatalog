@@ -608,7 +608,10 @@
             <button id="admin-removal-refresh" class="admin-refresh" type="button">Refresh Flagged List</button>
           </div>
           <p class="admin-note">Classes are flagged after 48 hours without a successful seat update or a missing-number error. The backend automatically hides eligible classes only after two complete SDSU checks. Original sections.json is never changed. Hidden classes can be restored below; uncertain or linked classes remain for review.</p>
-          <p id="admin-removal-result" class="admin-seat-refresh-result" aria-live="polite"></p>
+          <!-- CLASSCATALOG_REMOVAL_ACTIVITY_V1 -->
+          <p id="admin-removal-activity" class="admin-note" role="status" aria-live="polite">Loading automatic verification status...</p>
+          <p id="admin-removal-recent" class="admin-note" aria-live="polite"></p>
+          <p id="admin-removal-result" class="admin-seat-refresh-result" role="status" aria-live="polite"></p>
           <div class="admin-seat-failure-table-wrap">
             <table class="admin-seat-failure-table">
               <thead><tr><th>Semester / course</th><th>Class #</th><th>Last seat update</th><th>Verification</th><th>Actions</th></tr></thead>
@@ -1344,7 +1347,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=74&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
+<script src="/static/app.js?v=74&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1&amp;removalactivity=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>
