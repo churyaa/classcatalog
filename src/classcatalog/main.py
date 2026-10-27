@@ -786,7 +786,7 @@ def create_app(
     @app.get("/subjects", include_in_schema=False)
     async def subjects_page() -> Response:
         return Response(
-            content=seo_renderer.render_subject_index(seo_catalog),
+            content=await run_in_threadpool(seo_renderer.render_subject_index, seo_catalog),
             media_type="text/html",
         )
 
@@ -801,7 +801,7 @@ def create_app(
                 headers={"Location": f"/subjects/{subject.slug}"},
             )
         return Response(
-            content=seo_renderer.render_subject(seo_catalog, subject),
+            content=await run_in_threadpool(seo_renderer.render_subject, seo_catalog, subject),
             media_type="text/html",
         )
 
@@ -816,8 +816,8 @@ def create_app(
                 headers={"Location": f"/courses/{course.slug}"},
             )
 
-        options = active_repository.displayed_options(
-            course_code=course.course_code,
+        options = await run_in_threadpool(
+            active_repository.displayed_options, course_code=course.course_code,
         )
         if not options:
             raise HTTPException(status_code=404, detail="Course not found.")
@@ -830,7 +830,7 @@ def create_app(
             active_seat_service.register_interest(tuple(schedules))
 
         return Response(
-            content=seo_renderer.render_course(seo_catalog, course, options),
+            content=await run_in_threadpool(seo_renderer.render_course, seo_catalog, course, options),
             media_type="text/html",
         )
 
@@ -878,7 +878,7 @@ def create_app(
                 "age_seconds": None,
                 "browser_poll_seconds": 60,
             }
-        return active_seat_service.public_status()
+        return await run_in_threadpool(active_seat_service.public_status)
 
     @app.get("/api/ratings/status")
     async def ratings_status(response: Response) -> dict[str, object]:
@@ -903,7 +903,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="At most 250 class numbers can be requested at once.")
         if active_seat_service is not None:
             active_seat_service.register_interest(requested)
-            records = active_seat_service.seat_records(requested)
+            records = await run_in_threadpool(active_seat_service.seat_records, requested)
         else:
             records = {
                 f"{section.term}::{schedule}": {
@@ -1253,16 +1253,22 @@ def create_app(
     @app.get("/api/hidden-classes")
     async def public_hidden_classes(response: Response) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
+        hidden_items = await run_in_threadpool(removal_review.hidden_items)
         return {"hidden": [
             {"term": item["term"], "key": item["key"], "class_number": item["class_number"]}
-            for item in removal_review.hidden_items() if item["applied"]
+            for item in hidden_items if item["applied"]
         ]}
 
     @app.get("/api/admin/removals")
     async def admin_removal_candidates(request: Request, response: Response) -> dict[str, object]:
         _require_admin(request)
         response.headers["Cache-Control"] = "no-store"
-        return removal_review.candidates()
+        started = time_module.monotonic()
+        result = await run_in_threadpool(removal_review.candidates)
+        elapsed = time_module.monotonic() - started
+        if elapsed >= 1.0:
+            LOGGER.warning("slow_removal_dashboard duration_seconds=%.3f", elapsed)
+        return result
 
     @app.post("/api/admin/removals/verify")
     async def admin_verify_removal(
@@ -1468,7 +1474,13 @@ def create_app(
             page=page,
             page_size=page_size,
         )
-        result = active_repository.search(filters)
+        # CLASSCATALOG_BACKEND_PERFORMANCE_V1: search/grouping is synchronous CPU work.
+        # Keep it off the single Uvicorn event loop so status and homepage can respond.
+        started = time_module.monotonic()
+        result = await run_in_threadpool(active_repository.search, filters)
+        elapsed = time_module.monotonic() - started
+        if elapsed >= 1.0:
+            LOGGER.warning("slow_class_search duration_seconds=%.3f", elapsed)
         if active_seat_service is not None:
             schedules = []
             for item in result.items:

@@ -813,6 +813,24 @@ class SeatRefreshService:
                 "priority_interval_seconds": self.priority_interval_seconds,
             }
 
+    def missing_number_source_urls(self) -> set[str]:
+        """Minimal, lock-safe failure query for removal review.
+
+        Avoid rebuilding the full admin health response and scanning TBA targets
+        every time the Possible Removed Classes dashboard refreshes.
+        """
+        with self._lock:
+            return {
+                source_url
+                for source_url, failure in self._failure_history.items()
+                if "contains none of the expected class numbers" in str(failure.get("detail", ""))
+                and not bool(failure.get("resolved", False))
+                and not (
+                    (success := self._source_last_success.get(source_url)) is not None
+                    and success > float(failure.get("last_failed_timestamp") or 0.0)
+                )
+            }
+
     def admin_status(self) -> dict[str, object]:
         public = self.public_status()
         all_tba, refreshable_tba, tba_sources = self._tba_instructor_targets()

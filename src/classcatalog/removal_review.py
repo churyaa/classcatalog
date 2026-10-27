@@ -30,11 +30,12 @@ LOG = logging.getLogger(__name__)
 STALE_HOURS = 48
 CONFIRMATION_HOURS = 1
 # CLASSCATALOG_AUTOMATIC_REMOVAL_V1
-# CLASSCATALOG_REMOVAL_QUEUE_SPEED_V1: one SDSU-verified candidate per two-minute cycle.
-# A verification may itself take longer than two minutes, so the effective rate
-# is bounded by SDSU response time. This avoids bursts of live subject scrapes.
-AUTO_CYCLE_SECONDS = 120
-AUTO_INITIAL_SECONDS = 30
+# CLASSCATALOG_REMOVAL_QUEUE_SPEED_V1: still scan the full eligible queue.
+# CLASSCATALOG_REMOVAL_QUEUE_THROTTLE_V1: spread verification load evenly.
+# One live-verified candidate every 30 minutes, up to two per hour.
+# Wait two minutes after startup so normal seat refreshing can begin first.
+AUTO_CYCLE_SECONDS = 1800
+AUTO_INITIAL_SECONDS = 120
 AUTO_CHECKS_PER_CYCLE = 1
 AUTO_RETRY_SECONDS = 24 * 3600  # Avoid repeatedly scraping classes that still exist.
 
@@ -102,16 +103,22 @@ class RemovalReviewService:
 
     def candidates(self, *, limit: int | None = 250) -> dict[str, object]:
         now = _now()
-        failures = (
-            self.seat_service.admin_status().get("seat_failures", [])
-            if self.seat_service is not None else []
-        )
-        missing_number_urls = {
-            str(failure.get("source_url"))
-            for failure in failures
-            if not failure.get("resolved")
-            and "contains none of the expected class numbers" in str(failure.get("detail", ""))
-        }
+        # CLASSCATALOG_BACKEND_PERFORMANCE_V1: fast-path only the needed failure signal.
+        fast_failures = getattr(self.seat_service, "missing_number_source_urls", None)
+        if callable(fast_failures):
+            missing_number_urls = fast_failures()
+        else:
+            # Preserve compatibility with injected seat-service test doubles.
+            failures = (
+                self.seat_service.admin_status().get("seat_failures", [])
+                if self.seat_service is not None else []
+            )
+            missing_number_urls = {
+                str(failure.get("source_url"))
+                for failure in failures
+                if not failure.get("resolved")
+                and "contains none of the expected class numbers" in str(failure.get("detail", ""))
+            }
         with self._lock:
             groups = self._physical_sections()
             items: list[dict[str, object]] = []

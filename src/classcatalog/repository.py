@@ -247,6 +247,7 @@ class CourseRepository:
         if not updates:
             return 0
         changed_physical: set[tuple[str, str]] = set()
+        seat_status_changed = False  # CLASSCATALOG_BACKEND_PERFORMANCE_V1
         allowed = {
             "seat_status",
             "seats_available",
@@ -263,17 +264,25 @@ class CourseRepository:
                     replaced.append(section)
                     continue
                 values = {name: value for name, value in raw.items() if name in allowed}
-                if not values:
+                if not values or all(getattr(section, name) == value for name, value in values.items()):
                     replaced.append(section)
                     continue
                 candidate = section.model_copy(update=values)
                 if candidate != section:
                     changed_physical.add(key)
+                    if candidate.seat_status != section.seat_status:
+                        seat_status_changed = True
                 replaced.append(candidate)
-            self._sections = tuple(replaced)
-            self._sections_by_id = {section.id: section for section in self._sections}
             if changed_physical:
-                self._options = self._build_options()
+                self._sections = tuple(replaced)
+                self._sections_by_id = {section.id: section for section in self._sections}
+                # Only seat-status filter choices can change during a seat update.
+                # Rebuilding all course/program/instructor options per refresh is costly.
+                if seat_status_changed:
+                    statuses = {section.seat_status for section in self._sections}
+                    self._options = self._options.model_copy(update={
+                        "seat_statuses": tuple(status for status in SeatStatus if status in statuses),
+                    })
         return len(changed_physical)
 
     def replace_inventory(self, sections: tuple[CourseSection, ...]) -> None:
