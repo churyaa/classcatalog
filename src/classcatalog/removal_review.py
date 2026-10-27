@@ -13,9 +13,10 @@ from threading import Event, Lock
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 import shutil
-from threading import RLock, Thread
+from threading import RLock, Thread, current_thread, get_native_id, main_thread
 from typing import Callable
 from uuid import uuid4
 
@@ -200,6 +201,21 @@ class RemovalReviewService:
                name="classcatalog-removal-verification").start()
 
     def _verify(self, key: str, section: CourseSection) -> None:
+        # CLASSCATALOG_MANUAL_VERIFY_RESPONSIVENESS_V1: on Linux the nice value
+        # applies to an individual thread. Lower ONLY the verification thread's
+        # CPU priority, never the Uvicorn event loop or whole backend service.
+        # This uses no extra worker process or duplicated catalog in RAM.
+        if (
+            sys.platform.startswith("linux")
+            and current_thread() is not main_thread()
+            and hasattr(os, "setpriority")
+        ):
+            try:
+                os.setpriority(os.PRIO_PROCESS, get_native_id(), 10)
+            except OSError:
+                LOG.debug("removal_verification_priority_unavailable class=%s", key)
+        started = time.monotonic()
+        LOG.info("removal_verification_started class=%s", key)
         try:
             # Two independent complete searches, not two reads of an old URL.
             missing_first = self.probe(section)
@@ -222,6 +238,10 @@ class RemovalReviewService:
                 "section_ids": tuple(sorted(s.id for s in current)),
                 "seat_updates": tuple(sorted(str(s.seat_updated_at or "") for s in current)),
             }
+        LOG.info(
+            "removal_verification_finished class=%s status=%s duration_seconds=%.3f",
+            key, status, time.monotonic() - started,
+        )
 
     @staticmethod
     def _probe_live(section: CourseSection) -> bool:

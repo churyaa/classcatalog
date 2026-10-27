@@ -1277,7 +1277,9 @@ def create_app(
         _require_admin(request)
         response.headers["Cache-Control"] = "no-store"
         try:
-            removal_review.request_verification(payload.key)
+            # CLASSCATALOG_MANUAL_VERIFY_RESPONSIVENESS_V1: inventory validation
+            # can be expensive; never execute it on Uvicorn's event-loop thread.
+            await run_in_threadpool(removal_review.request_verification, payload.key)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"accepted": True, "key": payload.key}
