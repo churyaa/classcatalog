@@ -2363,8 +2363,9 @@ function seatSummary(section) {
   const statusLabel = status === "unknown"
     ? "Not posted"
     : labels[status] || status || "Not posted";
-  const primary = capacity != null && enrolled != null
-    ? `${statusLabel} ${enrolled}/${capacity}`
+  // SEAT_AVAILABILITY_DISPLAY_V1: numerator is available/open seats.
+  const primary = capacity != null && available != null
+    ? `${statusLabel} ${available}/${capacity}`
     : statusLabel;
 
   let secondary = "";

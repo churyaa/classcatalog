@@ -305,22 +305,23 @@ def seat_status_label(value: SeatStatus | str) -> str:
 
 
 def seat_count_summary(section: object) -> str:
+    """Show open seats / total capacity, never enrolled / total."""
+    # SEAT_AVAILABILITY_DISPLAY_V1
     enrolled = getattr(section, "seats_enrolled", None)
     available = getattr(section, "seats_available", None)
     capacity = getattr(section, "seat_capacity", None)
 
-    if enrolled is not None and capacity is not None:
-        return f"{enrolled} / {capacity}"
-
-    if enrolled is not None:
-        return f"{enrolled} enrolled"
-
     if available is not None and capacity is not None:
-        inferred_enrolled = max(capacity - available, 0)
-        return f"{inferred_enrolled} / {capacity}"
+        return f"{available} / {capacity}"
+
+    if enrolled is not None and capacity is not None:
+        return f"{max(capacity - enrolled, 0)} / {capacity}"
 
     if available is not None:
         return f"{available} available"
+
+    if enrolled is not None:
+        return f"{enrolled} enrolled"
 
     if capacity is not None:
         return f"{capacity} capacity"

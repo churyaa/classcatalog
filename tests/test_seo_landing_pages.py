@@ -236,8 +236,8 @@ def test_course_options_are_compact_and_include_rmp_metrics() -> None:
     assert "12345" in response.text
     assert "In person" in response.text
     assert ">Open<" in response.text
-    assert "23 / 30" in response.text
-    assert "7 / 30" not in response.text
+    assert "7 / 30" in response.text
+    assert "23 / 30" not in response.text
     assert "Mon/Wed 10:00 AM–10:50 AM" in response.text
     assert "GMCS 301" in response.text
     assert "Ada Lovelace" in response.text

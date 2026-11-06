@@ -35,6 +35,7 @@ SEAT_REFRESH_ENABLED_ENV = "CLASSCATALOG_SEAT_REFRESH_ENABLED"
 SEAT_CACHE_PATH_ENV = "CLASSCATALOG_SEAT_CACHE_PATH"
 SEAT_REQUEST_DELAY_ENV = "CLASSCATALOG_SEAT_REQUEST_DELAY_SECONDS"
 SEAT_PRIORITY_INTERVAL_ENV = "CLASSCATALOG_SEAT_PRIORITY_INTERVAL_SECONDS"
+SEAT_PREFERRED_TERM_ENV = "CLASSCATALOG_SEAT_PREFERRED_TERM"  # SPRING_SEAT_REFRESH_PRIORITY_V1
 SEAT_INTEREST_TTL_ENV = "CLASSCATALOG_SEAT_INTEREST_TTL_SECONDS"
 SEAT_BROWSER_POLL_ENV = "CLASSCATALOG_SEAT_BROWSER_POLL_SECONDS"
 SEAT_STALE_AFTER_ENV = "CLASSCATALOG_SEAT_STALE_AFTER_SECONDS"
@@ -136,6 +137,7 @@ class SeatRefreshService:
         interest_ttl_seconds: float | None = None,
         browser_poll_seconds: int | None = None,
         stale_after_seconds: int | None = None,
+        preferred_term: str | None = None,
         session_factory=None,
     ) -> None:
         self.repository = repository
@@ -177,6 +179,32 @@ class SeatRefreshService:
         self._wake = Event()
         self._thread: Thread | None = None
         self._sources = self._build_sources()
+        # Routine refresh scheduling: Spring first and four preferred pages for
+        # each non-preferred page. Manual and actively viewed pages retain
+        # their existing higher-priority queues. Other terms never starve.
+        configured_term = (
+            preferred_term if preferred_term is not None
+            else os.getenv(SEAT_PREFERRED_TERM_ENV, "")
+        ).strip()
+        spring_terms = [
+            term for term in self.repository.options().terms
+            if term.startswith("Spring ")
+        ]
+        self.preferred_term = configured_term or (spring_terms[-1] if spring_terms else "")
+        preferred_term_codes = {
+            section.term_code or section.term
+            for section in self.repository.sections
+            if section.term == self.preferred_term
+        }
+        self._preferred_sources = tuple(
+            url for url, source in self._sources.items()
+            if any(code in preferred_term_codes for code in source.schedule_to_term.values())
+        )
+        preferred_set = set(self._preferred_sources)
+        self._other_sources = tuple(url for url in self._sources if url not in preferred_set)
+        self._routine_turn = 0
+        self._preferred_cursor = 0
+        self._other_cursor = 0
         self._source_by_schedule: dict[str, set[str]] = {}
         self._source_by_course_code: dict[str, set[str]] = {}
         for url, source in self._sources.items():
@@ -421,6 +449,7 @@ class SeatRefreshService:
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
+            # Admin-requested refreshes always win over routine scheduling.
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
@@ -430,6 +459,8 @@ class SeatRefreshService:
             for url in expired:
                 self._interests.pop(url, None)
 
+            # A student's recently viewed course is still prioritized according
+            # to the configured priority interval, regardless of its semester.
             if iteration % 5 == 0:
                 priority = [
                     url
@@ -441,7 +472,24 @@ class SeatRefreshService:
 
             if not self._sources:
                 return None
-            return min(self._sources, key=lambda url: self._source_last_attempt.get(url, 0.0))
+
+            # SPRING_SEAT_REFRESH_PRIORITY_V1: deterministic, constant-time
+            # weighted round robin. Spring starts first, then gets four routine
+            # refresh turns for each other-semester turn, without starvation.
+            if self._preferred_sources and self._other_sources:
+                use_preferred = self._routine_turn % 5 != 4
+            else:
+                use_preferred = bool(self._preferred_sources)
+            self._routine_turn += 1
+            if use_preferred:
+                url = self._preferred_sources[
+                    self._preferred_cursor % len(self._preferred_sources)
+                ]
+                self._preferred_cursor += 1
+                return url
+            url = self._other_sources[self._other_cursor % len(self._other_sources)]
+            self._other_cursor += 1
+            return url
 
     def _run(self) -> None:
         iteration = 0
@@ -846,6 +894,9 @@ class SeatRefreshService:
                 "browser_poll_seconds": self.browser_poll_seconds,
                 "stale_after_seconds": self.stale_after_seconds,
                 "priority_interval_seconds": self.priority_interval_seconds,
+                "preferred_term": self.preferred_term,
+                "preferred_source_pages": len(self._preferred_sources),
+                "other_source_pages": len(self._other_sources),
             }
 
     def missing_number_source_urls(self) -> set[str]:
