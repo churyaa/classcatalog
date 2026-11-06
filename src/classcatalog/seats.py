@@ -45,6 +45,7 @@ DEFAULT_INTEREST_TTL_SECONDS = 900.0
 DEFAULT_BROWSER_POLL_SECONDS = 30
 DEFAULT_STALE_AFTER_SECONDS = 1800
 DEFAULT_CACHE_FLUSH_SECONDS = 30.0
+DEFAULT_STATUS_COUNTS_CACHE_SECONDS = 10.0  # BACKEND_PERFORMANCE_PATCH_1
 MAX_RETAINED_SEAT_FAILURES = 100
 
 LOGGER = logging.getLogger(__name__)
@@ -207,6 +208,12 @@ class SeatRefreshService:
         self._failure_history: OrderedDict[str, dict[str, object]] = OrderedDict()
         self._dirty = False
         self._last_flush_monotonic = 0.0
+        self._freshness_counts: tuple[int, int, int] | None = None
+        self._freshness_built_at = 0.0
+        self._freshness_record_total = -1
+        self._freshness_cache_hits = 0
+        self._freshness_cache_misses = 0
+        self._freshness_last_recount_ms = 0.0
         self._load_cache()
         self._apply_cached_records()
 
@@ -591,7 +598,7 @@ class SeatRefreshService:
             cache_rows: dict[tuple[str, str], dict[str, object]] = {}
             instructor_updates: dict[tuple[str, str], str] = {}
             instructor_cache_rows: dict[tuple[str, str], dict[str, object]] = {}
-            current_sections = self.repository.seat_snapshot(())
+            current_sections = self.repository.seat_snapshot(tuple(source.schedule_to_term))
             refreshed_at = _utc_now()
             for option in parsed.options:
                 class_number = option.class_number.strip()
@@ -780,20 +787,48 @@ class SeatRefreshService:
             self._last_flush_monotonic = now
 
     def public_status(self) -> dict[str, object]:
+        """Publish live status with short-lived cached *summary* counts.
+
+        Actual section seats and last-refresh timestamps remain immediately live.
+        Count summaries are cached for at most 10 seconds, unless record count
+        changes, which also keeps fresh + stale + pending equal to cached_sections.
+        """
         now = time.time()
+        monotonic_now = time.monotonic()
         with self._lock:
+            cache_valid = (
+                self._freshness_counts is not None
+                and monotonic_now - self._freshness_built_at < DEFAULT_STATUS_COUNTS_CACHE_SECONDS
+                and len(self._records) == self._freshness_record_total
+            )
+            if cache_valid:
+                self._freshness_cache_hits += 1
+            else:
+                recount_start = time.perf_counter()
+                fresh_cached = 0
+                stale_cached = 0
+                pending_cached = 0
+                for raw in self._records.values():
+                    updated_at = _parse_iso_timestamp(raw.get("updated_at"))
+                    if updated_at is None:
+                        pending_cached += 1
+                    elif max(0.0, now - updated_at) > self.stale_after_seconds:
+                        stale_cached += 1
+                    else:
+                        fresh_cached += 1
+                self._freshness_counts = (fresh_cached, stale_cached, pending_cached)
+                self._freshness_record_total = len(self._records)
+                self._freshness_built_at = monotonic_now
+                self._freshness_cache_misses += 1
+                self._freshness_last_recount_ms = (time.perf_counter() - recount_start) * 1000.0
+                if self._freshness_last_recount_ms >= 250.0:
+                    LOGGER.warning(
+                        "slow_seat_status_recount duration_ms=%.1f records=%d",
+                        self._freshness_last_recount_ms, len(self._records),
+                    )
+
+            fresh_cached, stale_cached, pending_cached = self._freshness_counts
             age = None if self._last_success_at is None else max(0.0, now - self._last_success_at)
-            fresh_cached = 0
-            stale_cached = 0
-            pending_cached = 0
-            for raw in self._records.values():
-                updated_at = _parse_iso_timestamp(raw.get("updated_at"))
-                if updated_at is None:
-                    pending_cached += 1
-                elif max(0.0, now - updated_at) > self.stale_after_seconds:
-                    stale_cached += 1
-                else:
-                    fresh_cached += 1
             return {
                 "enabled": self.enabled,
                 "running": bool(self._thread and self._thread.is_alive()),
@@ -881,6 +916,10 @@ class SeatRefreshService:
                     "seat_failures": failures,
                     "seat_failure_retention_limit": MAX_RETAINED_SEAT_FAILURES,
                     "request_delay_seconds": self.request_delay_seconds,
+                    "seat_status_cache_hits": self._freshness_cache_hits,
+                    "seat_status_cache_misses": self._freshness_cache_misses,
+                    "seat_status_last_recount_ms": round(self._freshness_last_recount_ms, 3),
+                    "seat_update_performance": self.repository.seat_update_performance(),
                     "priority_interval_seconds": self.priority_interval_seconds,
                     "stale_after_seconds": self.stale_after_seconds,
                 }

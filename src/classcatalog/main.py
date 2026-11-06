@@ -846,8 +846,10 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
+        # BACKEND_PERFORMANCE_PATCH_1: never recount cached seat timestamps on the event loop.
+        started = time_module.perf_counter()
         catalog_status = active_repository.catalog.status()
-        return {
+        payload = {
             "status": "ok",
             "classes": active_repository.total,
             "courses": active_repository.course_total,
@@ -859,11 +861,15 @@ def create_app(
             "catalog_requirements": catalog_status.requirements,
             "professor_ratings": active_repository.ratings_record_count,
             "seat_refresh": (
-                active_seat_service.public_status()
+                await run_in_threadpool(active_seat_service.public_status)
                 if active_seat_service is not None
                 else {"enabled": False, "running": False}
             ),
         }
+        elapsed = time_module.perf_counter() - started
+        if elapsed >= 1.0:
+            LOGGER.warning("slow_health_endpoint duration_seconds=%.3f", elapsed)
+        return payload
 
     @app.get("/api/seats/status")
     async def seat_refresh_status(response: Response) -> dict[str, object]:
@@ -878,7 +884,12 @@ def create_app(
                 "age_seconds": None,
                 "browser_poll_seconds": 60,
             }
-        return await run_in_threadpool(active_seat_service.public_status)
+        started = time_module.perf_counter()
+        status = await run_in_threadpool(active_seat_service.public_status)
+        elapsed = time_module.perf_counter() - started
+        if elapsed >= 1.0:
+            LOGGER.warning("slow_seat_status_endpoint duration_seconds=%.3f", elapsed)
+        return status
 
     @app.get("/api/ratings/status")
     async def ratings_status(response: Response) -> dict[str, object]:

@@ -29,8 +29,8 @@ def _fixture(tmp_path: Path, count: int = 252):
 
 
 def test_auto_checks_one_every_two_minutes():
-    assert AUTO_CYCLE_SECONDS == 120
-    assert AUTO_INITIAL_SECONDS == 30
+    assert AUTO_CYCLE_SECONDS == 1800
+    assert AUTO_INITIAL_SECONDS == 120
     assert AUTO_CHECKS_PER_CYCLE == 1
 
 

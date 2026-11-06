@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
+import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from threading import RLock
@@ -32,6 +35,8 @@ from classcatalog.ratings import (
 )
 from classcatalog.requirements import sort_requirement_labels
 
+
+LOGGER = logging.getLogger(__name__)  # BACKEND_PERFORMANCE_PATCH_1
 
 def _term_sort_key(term: str) -> tuple[int, int, str]:
     season_order = {"Winter": 0, "Spring": 1, "Summer": 2, "Fall": 3}
@@ -85,9 +90,43 @@ class CourseRepository:
         self._subject_total = len({section.subject for section in self._sections})
         self._options = self._build_options()
         self._sections_by_id = {section.id: section for section in self._sections}
+        self._rebuild_section_lookup_indices()
+        self._seat_update_count = 0
+        self._seat_update_last_ms = 0.0
+        self._seat_update_max_ms = 0.0
+        self._seat_update_total_ms = 0.0
         self._group_cache: tuple[CourseSection, ...] | None = None
         self._group_indices_by_section_id: dict[str, tuple[int, ...]] | None = None
         self._sort_index_cache: dict[SortBy, tuple[int, ...]] = {}
+
+    def _rebuild_section_lookup_indices(self) -> None:
+        """Index immutable physical section identities and schedule numbers.
+
+        Index locations remain valid across seat/instructor/ratings overlays, which
+        preserve section order. Rebuild after any full inventory replacement.
+        """
+        by_physical: dict[tuple[str, str], list[int]] = {}
+        by_schedule: dict[str, list[int]] = {}
+        for index, section in enumerate(self._sections):
+            by_physical.setdefault(self._physical_key(section), []).append(index)
+            by_schedule.setdefault(section.schedule_number, []).append(index)
+        self._section_indices_by_physical_key = {
+            key: tuple(indices) for key, indices in by_physical.items()
+        }
+        self._section_indices_by_schedule = {
+            key: tuple(indices) for key, indices in by_schedule.items()
+        }
+        self._seat_status_counts = Counter(section.seat_status for section in self._sections)
+
+    def seat_update_performance(self) -> dict[str, int | float]:
+        """Low-cost, non-sensitive counters for the admin health response."""
+        with self._lock:
+            return {
+                "calls": self._seat_update_count,
+                "last_ms": round(self._seat_update_last_ms, 3),
+                "max_ms": round(self._seat_update_max_ms, 3),
+                "total_ms": round(self._seat_update_total_ms, 3),
+            }
 
     @classmethod
     def from_json(
@@ -97,6 +136,7 @@ class CourseRepository:
         catalog_path: Path | None = None,
         ratings_path: Path | None = None,
     ) -> CourseRepository:
+        started = time.perf_counter()
         raw = json.loads(path.read_text(encoding="utf-8"))
         sections = tuple(CourseSection.model_validate(item) for item in raw)
         sections, _ = apply_cached_instructors(sections)
@@ -119,7 +159,7 @@ class CourseRepository:
             except Exception as exc:
                 # Catalog planning filters are supplemental to the class inventory.
                 catalog_load_error = f"{type(exc).__name__}: {exc}"
-        return cls(
+        result = cls(
             sections,
             catalog=catalog,
             ratings_record_count=ratings_record_count,
@@ -127,6 +167,12 @@ class CourseRepository:
             catalog_load_error=catalog_load_error,
             embedded_professors=embedded_professors,
         )
+        LOGGER.info(
+            "repository_initialized sections=%d duration_seconds=%.3f",
+            len(result.sections),
+            time.perf_counter() - started,
+        )
+        return result
 
     @property
     def sections(self) -> tuple[CourseSection, ...]:
@@ -237,52 +283,73 @@ class CourseRepository:
         self,
         updates: Mapping[tuple[str, str], Mapping[str, object]],
     ) -> int:
-        """Overlay volatile seat fields onto every matching physical section.
+        """Apply volatile seats to every listing of the same physical class.
 
-        The production dataset is immutable on disk.  The rolling SDSU seat refresher
-        updates only the in-memory section snapshot, keyed by ``(term, class number)``.
-        Duplicate/cross-listed listings for one physical class therefore stay in sync.
+        Only the indexed physical keys are examined. We still publish a new
+        immutable tuple and ID lookup to preserve concurrent search snapshots.
         """
-
         if not updates:
             return 0
-        changed_physical: set[tuple[str, str]] = set()
-        seat_status_changed = False  # CLASSCATALOG_BACKEND_PERFORMANCE_V1
-        allowed = {
+        started = time.perf_counter()
+        allowed = (
             "seat_status",
             "seats_available",
             "seat_capacity",
             "seats_enrolled",
             "seat_updated_at",
-        }
+        )
+        changed_physical: set[tuple[str, str]] = set()
         with self._lock:
-            replaced: list[CourseSection] = []
-            for section in self._sections:
-                key = self._physical_key(section)
-                raw = updates.get(key)
-                if raw is None:
-                    replaced.append(section)
+            changed_indices: dict[int, CourseSection] = {}
+            next_status_counts = self._seat_status_counts.copy()
+            seat_status_changed = False
+            for key, raw in updates.items():
+                indices = self._section_indices_by_physical_key.get(key, ())
+                if not indices:
                     continue
-                values = {name: value for name, value in raw.items() if name in allowed}
-                if not values or all(getattr(section, name) == value for name, value in values.items()):
-                    replaced.append(section)
+                values = {name: raw[name] for name in allowed if name in raw}
+                if not values:
                     continue
-                candidate = section.model_copy(update=values)
-                if candidate != section:
+                for index in indices:
+                    section = self._sections[index]
+                    if all(getattr(section, name) == value for name, value in values.items()):
+                        continue
+                    candidate = section.model_copy(update=values)
+                    if candidate == section:
+                        continue
+                    changed_indices[index] = candidate
                     changed_physical.add(key)
                     if candidate.seat_status != section.seat_status:
+                        next_status_counts[section.seat_status] -= 1
+                        next_status_counts[candidate.seat_status] += 1
                         seat_status_changed = True
-                replaced.append(candidate)
-            if changed_physical:
-                self._sections = tuple(replaced)
-                self._sections_by_id = {section.id: section for section in self._sections}
-                # Only seat-status filter choices can change during a seat update.
-                # Rebuilding all course/program/instructor options per refresh is costly.
+
+            if changed_indices:
+                sections = list(self._sections)
+                by_id = dict(self._sections_by_id)
+                for index, candidate in changed_indices.items():
+                    sections[index] = candidate
+                    by_id[candidate.id] = candidate
+                self._sections = tuple(sections)
+                self._sections_by_id = by_id
+                self._seat_status_counts = next_status_counts
                 if seat_status_changed:
-                    statuses = {section.seat_status for section in self._sections}
                     self._options = self._options.model_copy(update={
-                        "seat_statuses": tuple(status for status in SeatStatus if status in statuses),
+                        "seat_statuses": tuple(
+                            status for status in SeatStatus if next_status_counts[status] > 0
+                        ),
                     })
+
+            duration_ms = (time.perf_counter() - started) * 1000.0
+            self._seat_update_count += 1
+            self._seat_update_last_ms = duration_ms
+            self._seat_update_total_ms += duration_ms
+            self._seat_update_max_ms = max(self._seat_update_max_ms, duration_ms)
+        if duration_ms >= 250.0:
+            LOGGER.warning(
+                "slow_seat_apply duration_ms=%.1f updated_physical=%d incoming_keys=%d",
+                duration_ms, len(changed_physical), len(updates),
+            )
         return len(changed_physical)
 
     def replace_inventory(self, sections: tuple[CourseSection, ...]) -> None:
@@ -290,6 +357,7 @@ class CourseRepository:
         with self._lock:
             self._sections = tuple(sections)
             self._sections_by_id = {item.id: item for item in self._sections}
+            self._rebuild_section_lookup_indices()
             self._embedded_professors = {
                 key: value for key, value in self._embedded_professors.items()
                 if key in self._sections_by_id
@@ -311,15 +379,20 @@ class CourseRepository:
         self,
         schedule_numbers: Sequence[str] = (),
     ) -> dict[tuple[str, str], CourseSection]:
-        """Return one current record for each requested physical class number."""
-
-        wanted = {str(value).strip() for value in schedule_numbers if str(value).strip()}
+        """Return first current listing per physical class; index targeted reads."""
+        wanted = tuple(dict.fromkeys(
+            str(value).strip() for value in schedule_numbers if str(value).strip()
+        ))
         snapshot: dict[tuple[str, str], CourseSection] = {}
         with self._lock:
-            for section in self._sections:
-                if wanted and section.schedule_number not in wanted:
-                    continue
-                snapshot.setdefault(self._physical_key(section), section)
+            if wanted:
+                for number in wanted:
+                    for index in self._section_indices_by_schedule.get(number, ()):
+                        section = self._sections[index]
+                        snapshot.setdefault(self._physical_key(section), section)
+            else:
+                for section in self._sections:
+                    snapshot.setdefault(self._physical_key(section), section)
         return snapshot
 
     def _build_options(self) -> SearchOptions:
