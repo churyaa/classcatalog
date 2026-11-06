@@ -616,7 +616,7 @@
             </div>
             <button id="admin-removal-refresh" class="admin-refresh" type="button">Refresh Flagged List</button>
           </div>
-          <p class="admin-note">Classes are flagged after 48 hours without a successful seat update or a missing-number error. The backend automatically hides eligible classes only after two complete SDSU checks. Original sections.json is never changed. Hidden classes can be restored below; uncertain or linked classes remain for review.</p>
+          <p class="admin-note">Report-only by default: classes are flagged after 48 hours without a seat update, or when a complete SDSU course grid omits an expected section. A pending update alone does not mean removal. Automatic hiding is disabled by default to avoid rebuilding the live course index. Review and rescrape the listed course keys; the original dataset stays unchanged until you install validated replacements.</p>
           <p id="admin-removal-result" class="admin-seat-refresh-result" aria-live="polite"></p>
           <div class="admin-seat-failure-table-wrap">
             <table class="admin-seat-failure-table">
@@ -624,8 +624,17 @@
               <tbody id="admin-removal-list"><tr><td colspan="5">Loading flagged classes...</td></tr></tbody>
             </table>
           </div>
+          <h4>Courses to rescrape</h4>
+          <p class="admin-note">Includes flagged missing sections and previously hidden classes. Export a separate course-key file for each semester, then run a fresh targeted course scrape. Newly detected SDSU class numbers are not automatically added until the targeted dataset is validated.</p>
+          <div id="admin-removal-rescrape-exports" class="removal-actions"></div>
+          <div class="admin-seat-failure-table-wrap">
+            <table class="admin-seat-failure-table">
+              <thead><tr><th>Semester / course</th><th>Class numbers to check</th><th>Reason</th><th>Course key</th></tr></thead>
+              <tbody id="admin-removal-rescrape-list"><tr><td colspan="4">Loading targeted rescrape list...</td></tr></tbody>
+            </table>
+          </div>
           <!-- CLASSCATALOG_VISIBILITY_OVERLAY_V1 -->
-          <h4>Hidden classes</h4>
+          <h4>Previously hidden classes</h4>
           <p class="admin-note">Verified hidden class records remain in sections.json and can be restored to the public website.</p>
           <div class="admin-seat-failure-table-wrap">
             <table class="admin-seat-failure-table">
@@ -1353,7 +1362,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=76&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
+<script src="/static/app.js?v=77&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>

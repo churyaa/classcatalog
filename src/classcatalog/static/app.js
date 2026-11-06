@@ -2814,7 +2814,7 @@ async function loadRemovalReview() {
     const data = await fetchJson("/api/admin/removals", { cache: "no-store" },
       { fallbackMessage: "Flagged classes could not be loaded.", allowDetail: true });
     const items = Array.isArray(data.items) ? data.items : [];
-    // CLASSCATALOG_AUTOMATIC_REMOVAL_V1: show automatic deletion activity even after its row disappears.
+    // Legacy auto-hide history (only present when explicitly enabled).
     const result = document.querySelector("#admin-removal-result");
     const recent = Array.isArray(data.recent_auto_hides) ? data.recent_auto_hides : [];
     if (result && recent.length && !result.textContent.includes("Dismissed")) {
@@ -2830,6 +2830,43 @@ async function loadRemovalReview() {
         ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Open SDSU Source</a>` : "";
       return `<tr data-removal-key="${escapeHtml(item.key)}"><td>${escapeHtml(item.term)} · ${escapeHtml(item.course_code)}${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td><td>${escapeHtml(item.class_number)}</td><td>${escapeHtml(item.hidden_at)}</td><td><button class="admin-refresh" data-removal-action="unhide">Unhide class</button></td></tr>`;
     }).join("") : '<tr><td colspan="4">No hidden classes.</td></tr>';
+    // INVENTORY_SYNC_REPORT_ONLY_V2: per-semester downloadable key files.
+    const targets = Array.isArray(data.rescrape_targets) ? data.rescrape_targets : [];
+    const targetBody = document.querySelector("#admin-removal-rescrape-list");
+    if (targetBody) targetBody.innerHTML = targets.length ? targets.map((row) =>
+      `<tr><td>${escapeHtml(row.term)} · ${escapeHtml(row.course_code)}</td>` +
+      `<td>${escapeHtml((row.class_numbers || []).join(", ") || "New section(s) detected")}</td>` +
+      `<td>${escapeHtml((row.signals || []).join(", "))}</td>` +
+      `<td><code>${escapeHtml(row.course_key)}</code></td></tr>`
+    ).join("") : '<tr><td colspan="4">No hidden or missing-grid courses to rescrape.</td></tr>';
+    const exports = document.querySelector("#admin-removal-rescrape-exports");
+    if (exports) {
+      exports.replaceChildren();
+      const byTerm = new Map();
+      targets.forEach((row) => {
+        if (!byTerm.has(row.term)) byTerm.set(row.term, new Set());
+        byTerm.get(row.term).add(row.course_key);
+      });
+      byTerm.forEach((keys, term) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "admin-refresh";
+        button.textContent = `Export ${term} keys (${keys.size})`;
+        button.addEventListener("click", () => {
+          const payload = JSON.stringify([...keys].sort(), null, 2) + "\n";
+          const blob = new Blob([payload], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `classcatalog-rescrape-${term.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        exports.appendChild(button);
+      });
+    }
     tbody.innerHTML = items.length ? items.map((item) => {
       const label = `${item.term} · ${item.course_codes?.join(", ") || item.course_code}`;
       // CLASSCATALOG_REMOVAL_SOURCE_LINK_V1: official link mirrors Seat Refresh Failures.
@@ -2848,8 +2885,8 @@ async function loadRemovalReview() {
         : item.status === "suspected" ? "Suspected removal" : "Needs verification";
       const verify = !item.crosslisted && item.status !== "checking"
         ? `<button class="admin-refresh" data-removal-action="verify">Verify SDSU</button>` : "";
-      const del = item.can_delete
-        ? `<button class="admin-refresh" data-removal-action="hide">Hide class</button>` : "";
+      // Prefer targeted rescraping to rebuilding the live index by hiding.
+      const del = "";
       return `<tr data-removal-key="${escapeHtml(item.key)}">
         <td><strong>${escapeHtml(label)}</strong><small class="removal-evidence">${escapeHtml(evidence)}</small>${sourceLink ? `<small class="removal-evidence">${sourceLink}</small>` : ""}</td>
         <td>${escapeHtml(item.class_number)}</td>

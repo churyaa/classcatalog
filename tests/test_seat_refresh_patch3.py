@@ -156,4 +156,4 @@ def test_admin_frontend_renders_freshness_without_exposing_it_publicly() -> None
     assert 'seatTermBody' in js
     assert 'seats.semester_freshness' in js
     assert 'id="admin-seat-term-body"' in html
-    assert 'app.js?v=76' in html
+    assert 'app.js?v=77' in html

@@ -471,12 +471,13 @@ def create_app(
     removal_review = RemovalReviewService(
         active_repository, active_data_path, seat_service=active_seat_service,
     )
-    # CLASSCATALOG_AUTOMATIC_REMOVAL_V1: enabled for the production/default repository. Tests with
-    # explicitly injected repositories remain opt-in; disable in deployment with
-    # CLASSCATALOG_AUTO_REMOVAL_ENABLED=0.
+    # INVENTORY_SYNC_REPORT_ONLY_V2: automatic visibility changes are OFF
+    # by default because each hide rebuilds large search / SEO state. The admin
+    # dashboard now reports rescrape targets without changing public inventory.
+    # Set CLASSCATALOG_AUTO_REMOVAL_ENABLED=1 only to opt into legacy auto-hide.
     auto_removal_enabled = (
         course_repository is None
-        and os.getenv("CLASSCATALOG_AUTO_REMOVAL_ENABLED", "1").strip().lower()
+        and os.getenv("CLASSCATALOG_AUTO_REMOVAL_ENABLED", "0").strip().lower()
         not in {"0", "false", "off", "disabled", "no"}
     )
 

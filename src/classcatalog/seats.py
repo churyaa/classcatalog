@@ -256,6 +256,10 @@ class SeatRefreshService:
         self._term_snapshot_built_at = 0.0
         self._term_snapshot_records = -1
         self._resolved_url_by_source: dict[str, str] = {}
+        # Inventory signals are *not* evidence sufficient to hide a class.
+        # Persist per-source only, bounded by the refreshable source count.
+        self._missing_numbers_by_source: dict[str, set[str]] = {}
+        self._unlisted_numbers_by_source: dict[str, set[str]] = {}
         self._interests: dict[str, float] = {}
         self._manual_queue: deque[str] = deque()
         self._cycle_seen: set[str] = set()
@@ -715,6 +719,22 @@ class SeatRefreshService:
             instructor_updates: dict[tuple[str, str], str] = {}
             instructor_cache_rows: dict[tuple[str, str], dict[str, object]] = {}
             current_sections = self.repository.seat_snapshot(tuple(source.schedule_to_term))
+            observed_numbers = {
+                str(option.class_number).strip()
+                for option in parsed.options
+                if getattr(option, "class_number", None)
+            }
+            expected_numbers = set(source.schedule_to_term)
+            expected_terms = set(source.schedule_to_term.values())
+            # A partially paginated or wrong-term response can NEVER provide
+            # disappearance evidence. An intersection proves this is at least
+            # the course grid we expected (not an unrelated PeopleSoft page).
+            trustworthy_grid = (
+                getattr(parsed, "options_complete", False) is True
+                and len(expected_terms) == 1
+                and getattr(parsed, "term_code", None) in expected_terms
+                and bool(observed_numbers & expected_numbers)
+            )
             refreshed_at = _utc_now()
             for option in parsed.options:
                 class_number = option.class_number.strip()
@@ -786,6 +806,18 @@ class SeatRefreshService:
             changed = self.repository.apply_seat_updates(updates)
             completed_at = time.time()
             with self._lock:
+                if trustworthy_grid:
+                    missing = expected_numbers - observed_numbers
+                    unlisted = observed_numbers - expected_numbers
+                    if missing:
+                        self._missing_numbers_by_source[source_url] = missing
+                    else:
+                        self._missing_numbers_by_source.pop(source_url, None)
+                    if unlisted:
+                        self._unlisted_numbers_by_source[source_url] = unlisted
+                    else:
+                        self._unlisted_numbers_by_source.pop(source_url, None)
+                    self._dirty = True
                 self._records.update(cache_rows)
                 self._source_last_success[source_url] = completed_at
                 self._source_retry_after.pop(source_url, None)
@@ -855,6 +887,19 @@ class SeatRefreshService:
                 resolved_url = raw.get("resolved_url")
                 if isinstance(resolved_url, str) and is_course_info_url(resolved_url):
                     self._resolved_url_by_source[url] = resolved_url
+                source = self._sources[url]
+                for field, destination in (
+                    ("missing_class_numbers", self._missing_numbers_by_source),
+                    ("unlisted_class_numbers", self._unlisted_numbers_by_source),
+                ):
+                    values = raw.get(field)
+                    if not isinstance(values, list):
+                        continue
+                    cleaned = {x.strip() for x in values if isinstance(x, str) and x.strip()}
+                    if field == "missing_class_numbers":
+                        cleaned.intersection_update(source.schedule_to_term)
+                    if cleaned:
+                        destination[url] = cleaned
         generated = _parse_iso_timestamp(payload.get("updated_at"))
         if generated is not None:
             self._last_success_at = generated
@@ -890,6 +935,8 @@ class SeatRefreshService:
                 url: {
                     "last_success_at": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
                     "resolved_url": self._resolved_url_by_source.get(url),
+                    "missing_class_numbers": sorted(self._missing_numbers_by_source.get(url, ())),
+                    "unlisted_class_numbers": sorted(self._unlisted_numbers_by_source.get(url, ())),
                 }
                 for url, ts in self._source_last_success.items()
             }
@@ -975,6 +1022,43 @@ class SeatRefreshService:
                 "preferred_term": self.preferred_term,
                 "preferred_source_pages": len(self._preferred_sources),
                 "other_source_pages": len(self._other_sources),
+            }
+
+    def missing_section_keys(self) -> set[str]:
+        """Physical keys absent from the last trustworthy complete course grid."""
+        with self._lock:
+            keys: set[str] = set()
+            for url, numbers in self._missing_numbers_by_source.items():
+                source = self._sources.get(url)
+                if source is None:
+                    continue
+                for number in numbers:
+                    term = source.schedule_to_term.get(number)
+                    if term is not None:
+                        keys.add(f"{term}::{number}")
+            return keys
+
+    def unlisted_source_urls(self) -> set[str]:
+        """Sources with newly observed numbers needing a targeted detail rescrape."""
+        with self._lock:
+            return {url for url, values in self._unlisted_numbers_by_source.items()
+                    if values and url in self._sources}
+
+    def inventory_drift_status(self) -> dict[str, object]:
+        """Admin-only read-only inventory-change telemetry."""
+        with self._lock:
+            missing = sorted(self.missing_section_keys())
+            unlisted = sorted({
+                f"{','.join(self._sources[url].course_codes)}::{number}"
+                for url, numbers in self._unlisted_numbers_by_source.items()
+                if url in self._sources
+                for number in numbers
+            })
+            return {
+                "missing_section_candidates": len(missing),
+                "missing_section_examples": missing[:20],
+                "unlisted_class_numbers": len(unlisted),
+                "unlisted_class_examples": unlisted[:20],
             }
 
     def missing_number_source_urls(self) -> set[str]:
@@ -1095,6 +1179,7 @@ class SeatRefreshService:
                     "refreshable_course_codes": sorted(self._source_by_course_code),
                     "seat_failures": failures,
                     "seat_failure_retention_limit": MAX_RETAINED_SEAT_FAILURES,
+                    "inventory_drift": self.inventory_drift_status(),
                     "request_delay_seconds": self.request_delay_seconds,
                     "semester_freshness": [
                         dict(row,

@@ -120,6 +120,10 @@ class RemovalReviewService:
                 if not failure.get("resolved")
                 and "contains none of the expected class numbers" in str(failure.get("detail", ""))
             }
+        missing_keys: set[str] = set()
+        missing_reader = getattr(self.seat_service, "missing_section_keys", None)
+        if callable(missing_reader):
+            missing_keys = missing_reader()
         with self._lock:
             groups = self._physical_sections()
             items: list[dict[str, object]] = []
@@ -132,10 +136,11 @@ class RemovalReviewService:
                 )
                 age = max(0, (now - oldest).total_seconds() / 3600) if oldest else None
                 failed = any(str(s.source_url) in missing_number_urls for s in sections)
-                if (age is None or age < self.stale_hours) and not failed:
+                missing_in_grid = key in missing_keys
+                if (age is None or age < self.stale_hours) and not failed and not missing_in_grid:
                     continue
                 state = self._states.get(key, {})
-                status = str(state.get("status") or ("suspected" if failed else "stale"))
+                status = str(state.get("status") or ("suspected" if failed or missing_in_grid else "stale"))
                 # No successful live seat update since verification? Keep explicit
                 # result until a new manual review or cache refresh supersedes it.
                 items.append({
@@ -150,7 +155,8 @@ class RemovalReviewService:
                     ),
                     "seat_age_hours": round(age, 1) if age is not None else None,
                     "last_seat_update": oldest.isoformat() if oldest else None,
-                    "missing_class_number_failure": failed,
+                    "missing_class_number_failure": failed or missing_in_grid,
+                    "missing_section_signal": missing_in_grid,
                     "status": status,
                     "verified_at": state.get("verified_at"),
                     "error": state.get("error"),
@@ -160,12 +166,14 @@ class RemovalReviewService:
                 })
             items.sort(key=lambda row: (
                 0 if row["status"] == "confirmed_missing" else 1,
+                0 if row["missing_section_signal"] else 1,
                 0 if row["missing_class_number_failure"] else 1,
                 -(row["seat_age_hours"] or 0),
                 str(row["course_code"]),
             ))
             return {"stale_threshold_hours": self.stale_hours,
                     "total_flagged": len(items), "items": (items if limit is None else items[:max(0, limit)]),
+                    "rescrape_targets": self.rescrape_targets(missing_keys=missing_keys, items=items),
                     "auto_enabled": bool(self._auto_thread and self._auto_thread.is_alive()),
                     "auto_interval_minutes": AUTO_CYCLE_SECONDS // 60,
                     "auto_last_cycle": self._auto_last_cycle,
@@ -385,9 +393,23 @@ class RemovalReviewService:
         return [CourseSection.model_validate(entry) for entry in raw]
 
     def hidden_items(self) -> list[dict[str, object]]:
+        """Return persistent hidden entries in linear time, without mutating the catalog."""
         with self._lock:
-            return [
-                {
+            groups: dict[str, list[CourseSection]] = {}
+            for section in self._full_sections:
+                groups.setdefault(_key(section), []).append(section)
+            rows: list[dict[str, object]] = []
+            for item in self._hidden_records.values():
+                group = groups.get(str(item["key"]), [])
+                applied = bool(group) and (
+                    tuple(sorted(item["section_ids"])) == tuple(sorted(s.id for s in group))
+                    and all(
+                        item["course_code"] == s.course_code
+                        and item.get("crse_id", "") == str(s.crse_id or "")
+                        for s in group
+                    )
+                )
+                rows.append({
                     "key": item["key"], "term": item["term"],
                     "course_code": item["course_code"],
                     "class_number": item["class_number"],
@@ -395,10 +417,67 @@ class RemovalReviewService:
                     "verified_at": item["verified_at"],
                     "reason": item.get("reason", "SDSU confirmed absent"),
                     "source_url": item.get("source_url"),
-                    "applied": any(self._hidden_match(s) for s in self._full_sections
-                                   if _key(s) == item["key"]),
-                }
-                for item in self._hidden_records.values()
+                    "applied": applied,
+                })
+            return rows
+
+    def rescrape_targets(
+        self, *, missing_keys: set[str] | None = None,
+        items: list[dict[str, object]] | None = None,
+    ) -> list[dict[str, object]]:
+        """Group hidden, independently confirmed, and missing-grid classes by course.
+
+        Keys match classcatalog.scraping.progress.course_detail_key and can be
+        written to --course-keys-file. This function is read-only and bounded
+        by the active in-memory inventory. It does not rescrape or hide.
+        """
+        with self._lock:
+            if missing_keys is None:
+                reader = getattr(self.seat_service, "missing_section_keys", None)
+                missing_keys = reader() if callable(reader) else set()
+            signals: dict[str, set[str]] = {key: {"missing_grid"} for key in missing_keys}
+            for item in self.hidden_items():
+                if item["applied"]:
+                    signals.setdefault(str(item["key"]), set()).add("hidden")
+            if items is not None:
+                for item in items:
+                    if item["status"] == "confirmed_missing":
+                        signals.setdefault(str(item["key"]), set()).add("confirmed_missing")
+                    elif item.get("missing_class_number_failure") and not item.get("missing_section_signal"):
+                        signals.setdefault(str(item["key"]), set()).add("missing_source_page")
+            unlisted_reader = getattr(self.seat_service, "unlisted_source_urls", None)
+            unlisted_sources = unlisted_reader() if callable(unlisted_reader) else set()
+            grouped: dict[tuple[str, str, str], dict[str, object]] = {}
+            for section in self._full_sections:
+                key = _key(section)
+                source_has_new_numbers = str(section.source_url or "") in unlisted_sources
+                if key not in signals and not source_has_new_numbers:
+                    continue
+                # Source-level discovery must not classify every existing section
+                # on that course page as a newly added or removed class.
+                section_signals = set(signals.get(key, ()))
+                if source_has_new_numbers:
+                    section_signals.add("new_class_number")
+                course_key = "|".join((
+                    section.subject,
+                    section.crse_id or section.course_code,
+                    section.crse_offer_nbr or "",
+                    section.acad_career or "",
+                ))
+                group_key = (section.term, section.course_code, course_key)
+                row = grouped.setdefault(group_key, {
+                    "term": section.term, "subject": section.subject,
+                    "course_code": section.course_code, "course_key": course_key,
+                    "class_numbers": set(), "signals": set(),
+                })
+                if key in signals:
+                    row["class_numbers"].add(section.schedule_number)
+                row["signals"].update(section_signals)
+            return [
+                dict(row,
+                     class_numbers=sorted(row["class_numbers"]),
+                     signals=sorted(row["signals"]))
+                for _key_, row in sorted(grouped.items())
             ]
 
     def hide_confirmed(self, key: str) -> dict[str, object]:
