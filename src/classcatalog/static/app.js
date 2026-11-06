@@ -2936,7 +2936,25 @@ function renderAdminHealth(data) {
       adminMetric("Priority cadence", Number.isFinite(priorityMinutes) ? `${priorityMinutes.toFixed(priorityMinutes % 1 ? 1 : 0)} min` : "—"),
       adminMetric("Stale warning", Number.isFinite(staleMinutes) ? `${staleMinutes.toFixed(staleMinutes % 1 ? 1 : 0)} min` : "—"),
       adminMetric("Request delay", `${adminNumber(seats.request_delay_seconds)} sec`),
+      adminMetric("Cooling down", adminNumber(seats.cooldown_sources)),
+      adminMetric("Recent request avg", seats.recent_duration_avg_seconds == null ? "—" : `${adminNumber(seats.recent_duration_avg_seconds)} sec`),
+      adminMetric("Recent request p95", seats.recent_duration_p95_seconds == null ? "—" : `${adminNumber(seats.recent_duration_p95_seconds)} sec`),
+      adminMetric("Slow attempts (20s+)", adminNumber(seats.slow_refresh_attempts)),
     ].join("");
+  }
+  // SEAT_REFRESH_PATCH_3: per-term freshness for the administrator only.
+  const seatTermBody = document.querySelector("#admin-seat-term-body");
+  if (seatTermBody) {
+    const rows = Array.isArray(seats.semester_freshness) ? seats.semester_freshness : [];
+    seatTermBody.innerHTML = rows.length ? rows.map((item) => `<tr>
+      <td>${escapeHtml(item.term || "Unknown")}</td>
+      <td>${escapeHtml(adminNumber(item.source_pages))}</td>
+      <td>${escapeHtml(adminNumber(item.fresh_cached_sections))} / ${escapeHtml(adminNumber(item.refreshable_sections))} (${escapeHtml(adminNumber(item.fresh_percent))}%)</td>
+      <td>${escapeHtml(adminNumber(item.stale_cached_sections))}</td>
+      <td>${escapeHtml(adminNumber(item.uncached_sections))}</td>
+      <td>${escapeHtml(adminNumber(item.source_pages_successful_since_start))} / ${escapeHtml(adminNumber(item.source_pages))}</td>
+      <td>${escapeHtml(adminNumber(item.failures_since_start))}</td>
+    </tr>`).join("") : '<tr><td colspan="7">No refreshable classes available.</td></tr>';
   }
   const seatNote = document.querySelector("#admin-seat-note");
   if (seatNote) {

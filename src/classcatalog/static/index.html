@@ -569,6 +569,15 @@
           </form>
           <div id="admin-seat-metrics" class="admin-metric-grid"></div>
           <p id="admin-seat-note" class="admin-note"></p>
+          <!-- SEAT_REFRESH_PATCH_3: admin-only unique physical seat freshness by semester. -->
+          <h4>Seat freshness by semester</h4>
+          <p class="admin-note">Fresh means updated within the configured staleness window. Coverage includes only refreshable physical classes; counts are not guaranteed live.</p>
+          <div class="admin-seat-failure-table-wrap">
+            <table class="admin-seat-failure-table">
+              <thead><tr><th scope="col">Semester</th><th scope="col">Pages</th><th scope="col">Fresh seats</th><th scope="col">Stale</th><th scope="col">Uncached</th><th scope="col">Pages refreshed since restart</th><th scope="col">Failed attempts</th></tr></thead>
+              <tbody id="admin-seat-term-body"><tr><td colspan="7">Loading semester freshness...</td></tr></tbody>
+            </table>
+          </div>
         </section>
 
         <section class="admin-section" aria-labelledby="admin-seat-failures-title">
@@ -1344,7 +1353,7 @@
     </div>
   </footer>
     <script src="/static/theme-brand.js?v=1" defer></script>
-<script src="/static/app.js?v=75&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
+<script src="/static/app.js?v=76&amp;inboxops=1&amp;filters=4&amp;themes=8&amp;library=4&amp;filterpopout=1&amp;daystates=1&amp;themecookie=1&amp;branding=1&amp;instructorrefresh=1&amp;schedule=1&amp;groupedschedule=1&amp;scrollnav=1&amp;layoutpolish=1&amp;removalsource=1&amp;autoremove=1&amp;visibility=1" defer></script>
   <script src="/static/cookie-consent.js?v=1" defer></script>
 </body>
 </html>

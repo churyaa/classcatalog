@@ -48,6 +48,10 @@ DEFAULT_STALE_AFTER_SECONDS = 1800
 DEFAULT_CACHE_FLUSH_SECONDS = 30.0
 DEFAULT_STATUS_COUNTS_CACHE_SECONDS = 10.0  # BACKEND_PERFORMANCE_PATCH_1
 MAX_RETAINED_SEAT_FAILURES = 100
+# SEAT_REFRESH_PATCH_3: bounded source retries and admin-only diagnostics.
+SLOW_SEAT_REFRESH_SECONDS = 20.0
+SEAT_FAILURE_COOLDOWN_SECONDS = 60.0
+SEAT_FAILURE_COOLDOWN_MAX_SECONDS = 1800.0
 
 LOGGER = logging.getLogger(__name__)
 
@@ -205,6 +209,29 @@ class SeatRefreshService:
         self._routine_turn = 0
         self._preferred_cursor = 0
         self._other_cursor = 0
+        # Unique refreshable physical seats and source URLs by semester.
+        # This is built once; duplicate/cross-listed section rows count once.
+        code_to_name = {
+            section.term_code or section.term: section.term
+            for section in self.repository.sections
+        }
+        keys_by_term: dict[str, set[tuple[str, str]]] = {}
+        sources_by_term: dict[str, set[str]] = {}
+        self._source_term_names: dict[str, tuple[str, ...]] = {}
+        for url, source in self._sources.items():
+            names: set[str] = set()
+            for schedule, code in source.schedule_to_term.items():
+                name = code_to_name.get(code, code)
+                names.add(name)
+                keys_by_term.setdefault(name, set()).add((code, schedule))
+                sources_by_term.setdefault(name, set()).add(url)
+            self._source_term_names[url] = tuple(sorted(names))
+        self._term_physical_keys = {
+            name: tuple(sorted(keys)) for name, keys in keys_by_term.items()
+        }
+        self._term_source_pages = {
+            name: frozenset(urls) for name, urls in sources_by_term.items()
+        }
         self._source_by_schedule: dict[str, set[str]] = {}
         self._source_by_course_code: dict[str, set[str]] = {}
         for url, source in self._sources.items():
@@ -217,6 +244,17 @@ class SeatRefreshService:
         self._records: dict[tuple[str, str], dict[str, object]] = {}
         self._source_last_success: dict[str, float] = {}
         self._source_last_attempt: dict[str, float] = {}
+        self._source_retry_after: dict[str, float] = {}
+        self._source_failure_streak: dict[str, int] = {}
+        self._term_attempts: dict[str, int] = {}
+        self._term_successes: dict[str, int] = {}
+        self._term_failures: dict[str, int] = {}
+        self._successful_since_start: set[str] = set()
+        self._recent_durations: deque[float] = deque(maxlen=100)
+        self._slow_refresh_attempts = 0
+        self._term_snapshot: list[dict[str, object]] | None = None
+        self._term_snapshot_built_at = 0.0
+        self._term_snapshot_records = -1
         self._resolved_url_by_source: dict[str, str] = {}
         self._interests: dict[str, float] = {}
         self._manual_queue: deque[str] = deque()
@@ -446,10 +484,25 @@ class SeatRefreshService:
             self._wake.set()
         return len(candidates), len(refreshable_physical)
 
+    def _next_ready_routine(self, urls: tuple[str, ...], cursor_name: str, now: float) -> str | None:
+        """Find an eligible page without spinning on failed sources.
+
+        Routine cursors preserve fair rotation. Manual admin requests bypass
+        cooldowns, but normal and student-interest work honor them.
+        """
+        count = len(urls)
+        for _ in range(count):
+            cursor = getattr(self, cursor_name)
+            url = urls[cursor % count]
+            setattr(self, cursor_name, cursor + 1)
+            if self._source_retry_after.get(url, 0.0) <= now:
+                return url
+        return None
+
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
-            # Admin-requested refreshes always win over routine scheduling.
+            # Explicit admin refreshes always win, including when on cooldown.
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
@@ -459,37 +512,36 @@ class SeatRefreshService:
             for url in expired:
                 self._interests.pop(url, None)
 
-            # A student's recently viewed course is still prioritized according
-            # to the configured priority interval, regardless of its semester.
             if iteration % 5 == 0:
                 priority = [
-                    url
-                    for url in self._interests
-                    if now - self._source_last_attempt.get(url, 0.0) >= self.priority_interval_seconds
+                    url for url in self._interests
+                    if self._source_retry_after.get(url, 0.0) <= now
+                    and now - self._source_last_attempt.get(url, 0.0) >= self.priority_interval_seconds
                 ]
                 if priority:
                     return min(priority, key=lambda url: self._source_last_attempt.get(url, 0.0))
 
             if not self._sources:
                 return None
-
-            # SPRING_SEAT_REFRESH_PRIORITY_V1: deterministic, constant-time
-            # weighted round robin. Spring starts first, then gets four routine
-            # refresh turns for each other-semester turn, without starvation.
-            if self._preferred_sources and self._other_sources:
-                use_preferred = self._routine_turn % 5 != 4
-            else:
-                use_preferred = bool(self._preferred_sources)
+            # Keep the existing 4:1 Spring/other routine selection. If the
+            # selected pool is cooling down, try the other pool instead.
+            use_preferred = bool(self._preferred_sources) and (
+                not self._other_sources or self._routine_turn % 5 != 4
+            )
             self._routine_turn += 1
-            if use_preferred:
-                url = self._preferred_sources[
-                    self._preferred_cursor % len(self._preferred_sources)
-                ]
-                self._preferred_cursor += 1
-                return url
-            url = self._other_sources[self._other_cursor % len(self._other_sources)]
-            self._other_cursor += 1
-            return url
+            pools = (
+                ((self._preferred_sources, '_preferred_cursor'),
+                 (self._other_sources, '_other_cursor'))
+                if use_preferred else
+                ((self._other_sources, '_other_cursor'),
+                 (self._preferred_sources, '_preferred_cursor'))
+            )
+            for urls, cursor_name in pools:
+                if urls:
+                    url = self._next_ready_routine(urls, cursor_name, now)
+                    if url is not None:
+                        return url
+            return None
 
     def _run(self) -> None:
         iteration = 0
@@ -532,6 +584,17 @@ class SeatRefreshService:
                 if existing and existing.get("first_failed_at")
                 else failed_at_iso
             )
+            # Consecutive failures get a 1/2/4/... minute cooldown,
+            # capped at 30 minutes. Manual requests bypass it.
+            streak = self._source_failure_streak.get(source_url, 0) + 1
+            self._source_failure_streak[source_url] = streak
+            delay = min(SEAT_FAILURE_COOLDOWN_MAX_SECONDS,
+                        SEAT_FAILURE_COOLDOWN_SECONDS * (2 ** min(streak - 1, 6)))
+            next_retry = failed_at + delay
+            self._source_retry_after[source_url] = next_retry
+            for name in self._source_term_names.get(source_url, ()):
+                self._term_failures[name] = self._term_failures.get(name, 0) + 1
+            self._record_duration_locked(duration_seconds)
             self._failure_history[source_url] = {
                 "course_code": course_codes[0],
                 "course_codes": course_codes,
@@ -542,6 +605,8 @@ class SeatRefreshService:
                 "error_type": type(exc).__name__,
                 "detail": str(exc),
                 "occurrences": occurrences,
+                "retry_after_at": datetime.fromtimestamp(next_retry, tz=timezone.utc).isoformat(),
+                "last_duration_seconds": round(duration_seconds, 3),
                 "resolved": False,
             }
             while len(self._failure_history) > MAX_RETAINED_SEAT_FAILURES:
@@ -551,10 +616,11 @@ class SeatRefreshService:
             self._last_refresh_duration_seconds = duration_seconds
 
         LOGGER.error(
-            "seat_refresh_failed course=%s source=%s occurrences=%s error=%s: %s",
+            "seat_refresh_failed course=%s source=%s occurrences=%s duration_seconds=%.2f error=%s: %s",
             ", ".join(course_codes),
             source_url,
             occurrences,
+            duration_seconds,
             type(exc).__name__,
             exc,
             exc_info=(type(exc), exc, exc.__traceback__),
@@ -596,6 +662,8 @@ class SeatRefreshService:
             self._source_last_attempt[source_url] = attempted_at
             self._last_source = source_url
             self._last_course = ", ".join(source.course_codes[:3])
+            for name in self._source_term_names.get(source_url, ()):
+                self._term_attempts[name] = self._term_attempts.get(name, 0) + 1
 
         try:
             effective_url = self._resolved_url_by_source.get(source_url, source_url)
@@ -720,6 +788,11 @@ class SeatRefreshService:
             with self._lock:
                 self._records.update(cache_rows)
                 self._source_last_success[source_url] = completed_at
+                self._source_retry_after.pop(source_url, None)
+                self._source_failure_streak.pop(source_url, None)
+                self._successful_since_start.add(source_url)
+                for name in self._source_term_names.get(source_url, ()):
+                    self._term_successes[name] = self._term_successes.get(name, 0) + 1
                 retained_failure = self._failure_history.get(source_url)
                 if retained_failure is not None:
                     retained_failure["resolved"] = True
@@ -735,6 +808,11 @@ class SeatRefreshService:
                     self._cycle_seen.clear()
                 self._dirty = self._dirty or bool(cache_rows)
                 self._last_refresh_duration_seconds = time.monotonic() - started_monotonic
+                self._record_duration_locked(self._last_refresh_duration_seconds)
+            if time.monotonic() - started_monotonic >= SLOW_SEAT_REFRESH_SECONDS:
+                LOGGER.warning("slow_seat_refresh course=%s duration_seconds=%.2f",
+                               ", ".join(source.course_codes[:3]),
+                               time.monotonic() - started_monotonic)
             _ = changed
         except Exception as exc:  # noqa: BLE001 - one failed course must not stop the rolling queue
             self._record_source_failure(
@@ -917,9 +995,60 @@ class SeatRefreshService:
                 )
             }
 
+    def _record_duration_locked(self, duration: float) -> None:
+        """Called under self._lock; retain only the last 100 attempt durations."""
+        self._recent_durations.append(duration)
+        if duration >= SLOW_SEAT_REFRESH_SECONDS:
+            self._slow_refresh_attempts += 1
+
+    def _semester_freshness(self) -> list[dict[str, object]]:
+        """Admin-only stats for unique refreshable physical classes by term."""
+        now = time.time()
+        monotonic_now = time.monotonic()
+        with self._lock:
+            cached = (
+                self._term_snapshot is not None
+                and monotonic_now - self._term_snapshot_built_at < DEFAULT_STATUS_COUNTS_CACHE_SECONDS
+                and self._term_snapshot_records == len(self._records)
+            )
+            if cached:
+                return self._term_snapshot
+            rows: list[dict[str, object]] = []
+            for term, keys in sorted(self._term_physical_keys.items()):
+                fresh = stale = pending = cached_count = 0
+                for key in keys:
+                    record = self._records.get(key)
+                    if record is None:
+                        continue
+                    cached_count += 1
+                    timestamp = _parse_iso_timestamp(record.get('updated_at'))
+                    if timestamp is None:
+                        pending += 1
+                    elif max(0.0, now - timestamp) > self.stale_after_seconds:
+                        stale += 1
+                    else:
+                        fresh += 1
+                total = len(keys)
+                rows.append({
+                    'term': term,
+                    'refreshable_sections': total,
+                    'source_pages': len(self._term_source_pages.get(term, ())),
+                    'cached_sections': cached_count,
+                    'fresh_cached_sections': fresh,
+                    'stale_cached_sections': stale,
+                    'pending_cached_sections': pending,
+                    'uncached_sections': total - cached_count,
+                    'fresh_percent': round(100.0 * fresh / total, 1) if total else 0.0,
+                })
+            self._term_snapshot = rows
+            self._term_snapshot_built_at = monotonic_now
+            self._term_snapshot_records = len(self._records)
+            return rows
+
     def admin_status(self) -> dict[str, object]:
         public = self.public_status()
         all_tba, refreshable_tba, tba_sources = self._tba_instructor_targets()
+        freshness = self._semester_freshness()
         with self._lock:
             failures: list[dict[str, object]] = []
             for source_url, retained in reversed(self._failure_history.items()):
@@ -967,6 +1096,31 @@ class SeatRefreshService:
                     "seat_failures": failures,
                     "seat_failure_retention_limit": MAX_RETAINED_SEAT_FAILURES,
                     "request_delay_seconds": self.request_delay_seconds,
+                    "semester_freshness": [
+                        dict(row,
+                             attempts_since_start=self._term_attempts.get(str(row["term"]), 0),
+                             successes_since_start=self._term_successes.get(str(row["term"]), 0),
+                             failures_since_start=self._term_failures.get(str(row["term"]), 0),
+                             source_pages_successful_since_start=len(
+                                 self._successful_since_start.intersection(
+                                     self._term_source_pages.get(str(row["term"]), ())
+                                 )
+                             )) for row in freshness
+                    ],
+                    "cooldown_sources": sum(
+                        until > time.time() for until in self._source_retry_after.values()
+                    ),
+                    "slow_refresh_attempts": self._slow_refresh_attempts,
+                    "recent_duration_samples": len(self._recent_durations),
+                    "recent_duration_avg_seconds": (
+                        round(sum(self._recent_durations) / len(self._recent_durations), 3)
+                        if self._recent_durations else None
+                    ),
+                    "recent_duration_p95_seconds": (
+                        round(sorted(self._recent_durations)[
+                            (95 * len(self._recent_durations) + 99) // 100 - 1
+                        ], 3) if self._recent_durations else None
+                    ),
                     "seat_status_cache_hits": self._freshness_cache_hits,
                     "seat_status_cache_misses": self._freshness_cache_misses,
                     "seat_status_last_recount_ms": round(self._freshness_last_recount_ms, 3),
