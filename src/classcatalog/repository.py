@@ -11,7 +11,10 @@ from pathlib import Path
 from threading import RLock
 
 from classcatalog.catalog.repository import CatalogRepository
-from classcatalog.filters import SearchFilters, matches, normalize_campus, sort_sections
+from classcatalog.filters import (
+    SearchFilters, matches, normalize_campus, prepare_search_terms,
+    search_haystack, sort_sections,
+)  # BACKEND_PERFORMANCE_PATCH_2
 from classcatalog.instructors import apply_cached_instructors
 from classcatalog.models import (
     CourseComponent,
@@ -98,6 +101,12 @@ class CourseRepository:
         self._group_cache: tuple[CourseSection, ...] | None = None
         self._group_indices_by_section_id: dict[str, tuple[int, ...]] | None = None
         self._sort_index_cache: dict[SortBy, tuple[int, ...]] = {}
+        self._search_calls = 0
+        self._search_last_ms = 0.0
+        self._search_max_ms = 0.0
+        self._search_total_ms = 0.0
+        self._search_last_candidate_sections = 0
+        self._search_last_matched_sections = 0
 
     def _rebuild_section_lookup_indices(self) -> None:
         """Index immutable physical section identities and schedule numbers.
@@ -107,9 +116,13 @@ class CourseRepository:
         """
         by_physical: dict[tuple[str, str], list[int]] = {}
         by_schedule: dict[str, list[int]] = {}
+        by_term: dict[str, list[int]] = {}
+        search_texts: list[str] = []
         for index, section in enumerate(self._sections):
             by_physical.setdefault(self._physical_key(section), []).append(index)
             by_schedule.setdefault(section.schedule_number, []).append(index)
+            by_term.setdefault(section.term, []).append(index)
+            search_texts.append(search_haystack(section))
         self._section_indices_by_physical_key = {
             key: tuple(indices) for key, indices in by_physical.items()
         }
@@ -117,6 +130,10 @@ class CourseRepository:
             key: tuple(indices) for key, indices in by_schedule.items()
         }
         self._seat_status_counts = Counter(section.seat_status for section in self._sections)
+        self._section_indices_by_term = {
+            key: tuple(indices) for key, indices in by_term.items()
+        }
+        self._search_haystacks = tuple(search_texts)
 
     def seat_update_performance(self) -> dict[str, int | float]:
         """Low-cost, non-sensitive counters for the admin health response."""
@@ -126,6 +143,18 @@ class CourseRepository:
                 "last_ms": round(self._seat_update_last_ms, 3),
                 "max_ms": round(self._seat_update_max_ms, 3),
                 "total_ms": round(self._seat_update_total_ms, 3),
+            }
+
+    def search_performance(self) -> dict[str, int | float]:
+        """Admin-only search metrics; no private query text or user identity."""
+        with self._lock:
+            return {
+                "calls": self._search_calls,
+                "last_ms": round(self._search_last_ms, 3),
+                "max_ms": round(self._search_max_ms, 3),
+                "total_ms": round(self._search_total_ms, 3),
+                "last_candidate_sections": self._search_last_candidate_sections,
+                "last_matched_sections": self._search_last_matched_sections,
             }
 
     @classmethod
@@ -263,7 +292,8 @@ class CourseRepository:
         changed_physical: set[tuple[str, str]] = set()
         with self._lock:
             replaced: list[CourseSection] = []
-            for section in self._sections:
+            updated_search: list[str] | None = None
+            for index, section in enumerate(self._sections):
                 key = self._physical_key(section)
                 instructor = normalized.get(key)
                 if instructor is None or not is_placeholder_instructor(section.instructor):
@@ -272,9 +302,14 @@ class CourseRepository:
                 candidate = section.model_copy(update={"instructor": instructor, "professor": None})
                 if candidate != section:
                     changed_physical.add(key)
+                    if updated_search is None:
+                        updated_search = list(self._search_haystacks)
+                    updated_search[index] = search_haystack(candidate)
                 replaced.append(candidate)
             self._sections = tuple(replaced)
             self._sections_by_id = {section.id: section for section in self._sections}
+            if updated_search is not None:
+                self._search_haystacks = tuple(updated_search)
             self._invalidate_professor_sort_cache()
         return len(changed_physical)
 
@@ -838,9 +873,14 @@ class CourseRepository:
         )
         with self._lock:
             sections = self._sections
+            term_index = self._section_indices_by_term
+        candidates = (
+            (sections[index] for index in term_index.get(normalized_term, ()))
+            if normalized_term is not None else sections
+        )
         matched = [
             section
-            for section in sections
+            for section in candidates
             if (normalized_term is None or section.term == normalized_term)
             and (
                 normalized_subject is None
@@ -928,9 +968,32 @@ class CourseRepository:
         )
 
     def search(self, filters: SearchFilters) -> SearchResponse:
+        """Search only relevant terms with compiled filters and cached text."""
+        started = time.perf_counter()
         with self._lock:
             sections = self._sections
-        matched = [section for section in sections if matches(section, filters)]
+            term_index = self._section_indices_by_term
+            search_texts = self._search_haystacks
+
+        if len(filters.terms) == 1:
+            candidates = term_index.get(filters.terms[0], ())
+        elif filters.terms:
+            # Multiple term selections must preserve source ordering and not
+            # count duplicated terms twice, exactly like the original scan.
+            candidates = tuple(sorted({
+                index for term in filters.terms for index in term_index.get(term, ())
+            }))
+        else:
+            candidates = range(len(sections))
+
+        prepared = prepare_search_terms(filters)
+        matched = [
+            sections[index] for index in candidates
+            if matches(
+                sections[index], filters, prepared=prepared,
+                search_text=search_texts[index],
+            )
+        ]
         selected = self._selected_group_indices(matched)
         ordered_indices = tuple(
             index
@@ -946,7 +1009,7 @@ class CourseRepository:
         end = start + page_size
         page_indices = ordered_indices[start:end]
 
-        return SearchResponse(
+        result = SearchResponse(
             filtered_total=len(ordered_indices),
             unfiltered_total=len(group_cache),
             page=page,
@@ -954,6 +1017,15 @@ class CourseRepository:
             total_pages=total_pages,
             items=self._materialize_group_indices(page_indices),
         )
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        with self._lock:
+            self._search_calls += 1
+            self._search_last_ms = duration_ms
+            self._search_total_ms += duration_ms
+            self._search_max_ms = max(self._search_max_ms, duration_ms)
+            self._search_last_candidate_sections = len(candidates)
+            self._search_last_matched_sections = len(matched)
+        return result
 
 
 DATA_DIRECTORY = Path(__file__).parent / "data"

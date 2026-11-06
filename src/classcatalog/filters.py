@@ -75,6 +75,48 @@ def _course_code_prefix_query(value: str) -> str | None:
     return None
 
 
+# BACKEND_PERFORMANCE_PATCH_2: compiled, request-scoped filter constants.
+@dataclass(frozen=True, slots=True)
+class PreparedSearchTerms:
+    """Values independent of individual sections, computed once per search."""
+
+    campuses: frozenset[str]
+    completed_courses: frozenset[str]
+    query_terms: tuple[tuple[str, str | None], ...]
+    requirements: frozenset[str]
+    days: frozenset[Weekday]
+    excluded_days: frozenset[Weekday]
+
+
+def prepare_search_terms(filters: SearchFilters) -> PreparedSearchTerms:
+    """Avoid repeating normalization, tokenization, and set creation per row."""
+    return PreparedSearchTerms(
+        campuses=frozenset(normalize_campus(value) for value in filters.campuses),
+        completed_courses=frozenset(normalize_course_code(value) for value in filters.completed_courses),
+        query_terms=tuple(
+            (term.casefold(), _course_code_prefix_query(term))
+            for term in _query_terms(filters.query or "")
+        ),
+        requirements=frozenset(filters.requirements),
+        days=frozenset(filters.days),
+        excluded_days=frozenset(filters.excluded_days),
+    )
+
+
+def search_haystack(section: CourseSection) -> str:
+    """Match the original searchable fields, including linked instructors."""
+    return " ".join(
+        value
+        for value in (
+            section.course_code,
+            section.title,
+            section.instructor or "",
+            *(component.instructor or "" for component in section.linked_components),
+        )
+        if value
+    ).casefold()
+
+
 def _matches_program_classification(
     section: CourseSection,
     filters: SearchFilters,
@@ -131,43 +173,41 @@ def normalize_campus(value: str) -> str:
     return " ".join(value.strip().split())
 
 
-def matches(section: CourseSection, filters: SearchFilters) -> bool:
+def matches(
+    section: CourseSection, filters: SearchFilters, *,
+    prepared: PreparedSearchTerms | None = None,
+    search_text: str | None = None,
+) -> bool:
+    prepared = prepared if prepared is not None else prepare_search_terms(filters)
     if filters.terms and section.term not in filters.terms:
         return False
 
     if filters.campuses:
-        selected_campuses = {normalize_campus(value) for value in filters.campuses}
-        if normalize_campus(section.campus) not in selected_campuses:
+        if normalize_campus(section.campus) not in prepared.campuses:
             return False
 
     if filters.completed_courses:
-        completed = {normalize_course_code(code) for code in filters.completed_courses}
-        if normalize_course_code(section.course_code) in completed:
+        if normalize_course_code(section.course_code) in prepared.completed_courses:
             return False
 
     if filters.query:
-        query_terms = _query_terms(filters.query)
-        course_code = normalize_course_code(section.course_code)
-        haystack = " ".join(
-            value
-            for value in (
-                section.course_code,
-                section.title,
-                section.instructor or "",
-                *(component.instructor or "" for component in section.linked_components),
-            )
-            if value
-        ).casefold()
-        for query_term in query_terms:
-            course_code_prefix = _course_code_prefix_query(query_term)
+        # Compile query terms once. A code-prefix search preserves the original
+        # prefix matching; other terms use the same case-folded searchable text.
+        haystack = None
+        course_code = None
+        for folded_term, course_code_prefix in prepared.query_terms:
             if course_code_prefix is not None:
+                if course_code is None:
+                    course_code = normalize_course_code(section.course_code)
                 if not course_code.startswith(course_code_prefix):
                     return False
                 continue
-            if query_term.casefold() not in haystack:
+            if haystack is None:
+                haystack = search_text if search_text is not None else search_haystack(section)
+            if folded_term not in haystack:
                 return False
 
-    if filters.requirements and not set(filters.requirements).issubset(
+    if filters.requirements and not prepared.requirements.issubset(
         set(section.requirement_tags)
     ):
         return False
@@ -186,13 +226,11 @@ def matches(section: CourseSection, filters: SearchFilters) -> bool:
         return False
 
     if filters.days:
-        selected_days = set(filters.days)
-        if not any(selected_days.intersection(meeting.days) for meeting in section.meetings):
+        if not any(prepared.days.intersection(meeting.days) for meeting in section.meetings):
             return False
 
     if filters.excluded_days:
-        excluded_days = set(filters.excluded_days)
-        if any(excluded_days.intersection(meeting.days) for meeting in section.meetings):
+        if any(prepared.excluded_days.intersection(meeting.days) for meeting in section.meetings):
             return False
 
     if not _matches_time_window(section, filters):

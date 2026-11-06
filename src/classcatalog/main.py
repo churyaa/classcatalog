@@ -239,6 +239,7 @@ def _admin_health_snapshot(
     return {
         "status": "passed" if audit.status == "passed" else "failed",
         "checked_at": datetime.now(timezone.utc).isoformat(),
+        "search_performance": repository.search_performance(),  # BACKEND_PERFORMANCE_PATCH_2
         "seat_refresh": (
             seat_refresh_service.admin_status()
             if seat_refresh_service is not None
