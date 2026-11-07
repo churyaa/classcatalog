@@ -236,6 +236,24 @@ class SeatRefreshService:
         self._term_source_pages = {
             name: frozenset(urls) for name, urls in sources_by_term.items()
         }
+        # Rotate non-preferred semesters separately. The old single _other_sources
+        # queue placed thousands of Fall pages before Summer and Winter, causing
+        # those terms to wait for a nearly complete Fall sweep.
+        self._other_term_sources: dict[str, tuple[str, ...]] = {}
+        assigned_other_urls: set[str] = set()
+        for name in sorted(self._term_source_pages):
+            if name == self.preferred_term:
+                continue
+            urls = tuple(
+                url for url in self._other_sources
+                if url in self._term_source_pages[name] and url not in assigned_other_urls
+            )
+            if urls:
+                self._other_term_sources[name] = urls
+                assigned_other_urls.update(urls)
+        self._other_term_order = tuple(self._other_term_sources)
+        self._other_term_turn = 0
+        self._other_term_cursors = {name: 0 for name in self._other_term_order}
         self._source_by_schedule: dict[str, set[str]] = {}
         self._source_by_course_code: dict[str, set[str]] = {}
         for url, source in self._sources.items():
@@ -492,18 +510,66 @@ class SeatRefreshService:
             self._wake.set()
         return len(candidates), len(refreshable_physical)
 
-    def _next_ready_routine(self, urls: tuple[str, ...], cursor_name: str, now: float) -> str | None:
-        """Find an eligible page without spinning on failed sources.
+    def _next_ready_routine(
+        self,
+        urls: tuple[str, ...],
+        cursor_name: str,
+        now: float,
+        *,
+        term: str | None = None,
+    ) -> str | None:
+        """Select the least recently successful eligible page within a pool.
 
-        Routine cursors preserve fair rotation. Manual admin requests bypass
-        cooldowns, but normal and student-interest work honor them.
+        Never-refreshed pages are preferred over pages with prior successes.
+        Last-attempt time breaks ties to avoid repeatedly selecting one failed
+        page as its cooldown expires. Cursors break remaining ties fairly.
+        Admin requests and actively-viewed class priorities are unchanged.
         """
         count = len(urls)
+        if not count:
+            return None
+        cursor = (
+            self._other_term_cursors[term]
+            if term is not None else getattr(self, cursor_name)
+        )
+        best_index: int | None = None
+        best_age: tuple[float, float] | None = None
+        for offset in range(count):
+            index = (cursor + offset) % count
+            url = urls[index]
+            if self._source_retry_after.get(url, 0.0) > now:
+                continue
+            age = (
+                self._source_last_success.get(url, 0.0),
+                self._source_last_attempt.get(url, 0.0),
+            )
+            if best_age is None or age < best_age:
+                best_age = age
+                best_index = index
+                if age == (0.0, 0.0):
+                    break
+        if best_index is None:
+            return None
+        if term is not None:
+            self._other_term_cursors[term] = best_index + 1
+        else:
+            setattr(self, cursor_name, best_index + 1)
+        return urls[best_index]
+
+    def _next_other_term_source(self, now: float) -> str | None:
+        """Give each other semester its own turn, skipping cooling pools.
+
+        A course URL shared across terms is assigned to just one pool; a single
+        successful request still refreshes all sections represented by that URL.
+        """
+        count = len(self._other_term_order)
         for _ in range(count):
-            cursor = getattr(self, cursor_name)
-            url = urls[cursor % count]
-            setattr(self, cursor_name, cursor + 1)
-            if self._source_retry_after.get(url, 0.0) <= now:
+            name = self._other_term_order[self._other_term_turn % count]
+            self._other_term_turn += 1
+            url = self._next_ready_routine(
+                self._other_term_sources[name], "_other_cursor", now, term=name
+            )
+            if url is not None:
                 return url
         return None
 
@@ -531,25 +597,24 @@ class SeatRefreshService:
 
             if not self._sources:
                 return None
-            # Keep the existing 4:1 Spring/other routine selection. If the
-            # selected pool is cooling down, try the other pool instead.
+            # Preserve the existing 4:1 Spring/other preference while
+            # rotating *which* non-Spring semester receives each other turn.
+            # Inside each semester, favor oldest/never refreshed pages.
             use_preferred = bool(self._preferred_sources) and (
                 not self._other_sources or self._routine_turn % 5 != 4
             )
             self._routine_turn += 1
-            pools = (
-                ((self._preferred_sources, '_preferred_cursor'),
-                 (self._other_sources, '_other_cursor'))
-                if use_preferred else
-                ((self._other_sources, '_other_cursor'),
-                 (self._preferred_sources, '_preferred_cursor'))
+            if use_preferred:
+                url = self._next_ready_routine(
+                    self._preferred_sources, "_preferred_cursor", now
+                )
+                return url if url is not None else self._next_other_term_source(now)
+            url = self._next_other_term_source(now)
+            if url is not None:
+                return url
+            return self._next_ready_routine(
+                self._preferred_sources, "_preferred_cursor", now
             )
-            for urls, cursor_name in pools:
-                if urls:
-                    url = self._next_ready_routine(urls, cursor_name, now)
-                    if url is not None:
-                        return url
-            return None
 
     def _run(self) -> None:
         iteration = 0
