@@ -21,6 +21,8 @@ from classcatalog.instructors import (
 from classcatalog.models import SeatStatus
 from classcatalog.ratings import is_placeholder_instructor
 from classcatalog.repository import CourseRepository
+from classcatalog.scraping.class_detail import parse_class_information_page
+from classcatalog.scraping.class_post import find_class_number_actions
 from classcatalog.scraping.constants import DETAIL_URL, INSTITUTION_CODE
 from classcatalog.scraping.course_option_pagination import CourseOptionPaginationError
 from classcatalog.scraping.parser import ResultParseError, parse_course_info_page
@@ -52,6 +54,8 @@ MAX_RETAINED_SEAT_FAILURES = 100
 SLOW_SEAT_REFRESH_SECONDS = 20.0
 SEAT_FAILURE_COOLDOWN_SECONDS = 60.0
 SEAT_FAILURE_COOLDOWN_MAX_SECONDS = 1800.0
+# Bound expensive per-section PeopleSoft modal requests on linked options.
+MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE = 4
 
 LOGGER = logging.getLogger(__name__)
 
@@ -651,11 +655,124 @@ class SeatRefreshService:
             for option in parsed.options
             if option.class_number and option.class_number.strip()
         }
+        # One PeopleSoft option row can include multiple physical class actions.
+        # The ordinary grid parser only emits its first component.
+        returned_schedules.update(
+            action.class_number for action in find_class_number_actions(loaded.html)
+        )
         if expected_schedules and returned_schedules.isdisjoint(expected_schedules):
             raise ResultParseError(
                 "The course-information page contains none of the expected class numbers."
             )
         return parsed
+
+    def _refresh_linked_component_seats(
+        self,
+        client: SdsuPeopleSoftSession,
+        loaded,
+        source: SeatSource,
+        *,
+        parsed_term_code: str | None,
+        cache_rows: dict[tuple[str, str], dict[str, object]],
+        updates: dict[tuple[str, str], dict[str, object]],
+        refreshed_at: str,
+    ) -> None:
+        """Read each missing linked class from its own Class Availability modal.
+
+        SDSU renders a whole enrollment option in one HTML row (e.g. Discussion
+        1002 + Laboratory 1003). Grid-level seat text can repeat the PRIMARY
+        component's 64/70 for both links, so it must not be credited to the lab.
+        Only an exact class-number modal with actual seat counts can update the
+        secondary component's independent seat timestamp.
+        """
+        expected_terms = set(source.schedule_to_term.values())
+        if len(expected_terms) != 1 or parsed_term_code not in expected_terms:
+            return
+
+        visible_numbers = {
+            action.class_number for action in find_class_number_actions(loaded.html)
+        }
+        missing = (
+            set(source.schedule_to_term)
+            & visible_numbers
+            - {schedule for _term, schedule in cache_rows}
+        )
+        if not missing:
+            return
+
+        # Prevent many class-modal POSTs from blocking the whole seat-refresh queue.
+        # When the source is refreshed again, prioritize older/missing records.
+        with self._lock:
+            candidates = sorted(
+                missing,
+                key=lambda number: (
+                    _parse_iso_timestamp(
+                        self._records.get(
+                            (source.schedule_to_term[number], number), {}
+                        ).get("updated_at")
+                    ) or 0.0,
+                    number,
+                ),
+            )
+        for number in candidates[:MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE]:
+            term_key = source.schedule_to_term[number]
+            try:
+                tab = client.fetch_class_detail_tab_page(
+                    loaded.canonical_url, number, "CA"
+                )
+                live = parse_class_information_page(tab.html)
+                if live.class_number != number or live.selected_tab_value != "CA":
+                    raise ValueError(
+                        "Class Availability modal did not confirm the requested class"
+                    )
+                if live.seats_available is None or live.seat_capacity is None:
+                    raise ValueError(
+                        "Class Availability modal omitted individual seat counts"
+                    )
+            except Exception as exc:  # noqa: BLE001 - one lab cannot block other seats
+                LOGGER.warning(
+                    "seat_linked_component_modal_failed course=%s class=%s "
+                    "error=%s: %s",
+                    ", ".join(source.course_codes[:3]),
+                    number,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+
+            # Open seats win over a delayed Waitlist/Closed status, just as they
+            # do for ordinary option rows. Unknown status does not override data.
+            if live.seats_available > 0:
+                status = SeatStatus.OPEN
+            elif live.status is not SeatStatus.UNKNOWN:
+                status = live.status
+            else:
+                current = self.repository.seat_snapshot((number,)).get(
+                    (term_key, number)
+                )
+                status = current.seat_status if current is not None else SeatStatus.UNKNOWN
+
+            enrolled = live.seats_enrolled
+            if enrolled is None:
+                enrolled = max(live.seat_capacity - live.seats_available, 0)
+            key = (term_key, number)
+            updates[key] = {
+                "seat_status": status,
+                "seats_available": live.seats_available,
+                "seat_capacity": live.seat_capacity,
+                "seats_enrolled": enrolled,
+                "seat_updated_at": refreshed_at,
+            }
+            cache_rows[key] = {
+                "term": term_key,
+                "schedule_number": number,
+                "seat_status": status.value,
+                "seats_available": live.seats_available,
+                "seat_capacity": live.seat_capacity,
+                "seats_enrolled": enrolled,
+                "updated_at": refreshed_at,
+                "source_url": source.url,
+            }
 
     def _refresh_source(self, client: SdsuPeopleSoftSession, source_url: str) -> None:
         source = self._sources[source_url]
@@ -795,6 +912,14 @@ class SeatRefreshService:
                     "source_url": source_url,
                 }
 
+            # Recover physical secondary components omitted by the option-row parser.
+            self._refresh_linked_component_seats(
+                client, loaded, source,
+                parsed_term_code=getattr(parsed, "term_code", None),
+                cache_rows=cache_rows,
+                updates=updates,
+                refreshed_at=refreshed_at,
+            )
             changed_instructors = self.repository.apply_instructor_updates(instructor_updates)
             if changed_instructors:
                 with self._lock:
@@ -807,7 +932,13 @@ class SeatRefreshService:
             completed_at = time.time()
             with self._lock:
                 if trustworthy_grid:
-                    missing = expected_numbers - observed_numbers
+                    # Actions prove the class is still listed even when the
+                    # one-component-per-row parser omits a linked lab.
+                    listed_numbers = observed_numbers | {
+                        action.class_number
+                        for action in find_class_number_actions(loaded.html)
+                    }
+                    missing = expected_numbers - listed_numbers
                     unlisted = observed_numbers - expected_numbers
                     if missing:
                         self._missing_numbers_by_source[source_url] = missing
