@@ -114,6 +114,9 @@ class SeatUnverifiedEmptyGridError(ResultParseError):
 
 LOGGER = logging.getLogger(__name__)
 
+# Max routine pages in a row from one semester + subject before affinity pauses.
+SEAT_ROUTINE_SUBJECT_BATCH_MAX = 8
+
 
 def _has_explicit_no_scheduled_classes_message(html: str) -> bool:
     """Recognize SDSU's *course-option* empty state, not generic page text.
@@ -369,6 +372,11 @@ class SeatRefreshService:
         self._last_instructor_updates = 0
         self._successful_sources = 0
         self._failed_sources = 0
+        # SEAT_SUBJECT_BATCH_TELEMETRY_V1: bounded in-memory telemetry and routine subject affinity.
+        self._seat_throughput_events: deque[tuple[float, str, int]] = deque(maxlen=10000)
+        self._worker_context_affinity: tuple[str, str, str] | None = None
+        self._routine_batch_context: tuple[str, str, str] | None = None
+        self._routine_batch_count = 0
         self._requests_completed = 0
         self._failure_history: OrderedDict[str, dict[str, object]] = OrderedDict()
         self._dirty = False
@@ -591,12 +599,12 @@ class SeatRefreshService:
         *,
         term: str | None = None,
     ) -> str | None:
-        """Select the least recently successful eligible page within a pool.
+        """Choose an oldest-eligible page, batching equal-age subjects.
 
-        Never-refreshed pages are preferred over pages with prior successes.
-        Last-attempt time breaks ties to avoid repeatedly selecting one failed
-        page as its cooldown expires. Cursors break remaining ties fairly.
-        Admin requests and actively-viewed class priorities are unchanged.
+        Respect the existing Spring/other term allocation: only choose within
+        the pool the fairness scheduler assigned. Active/manual queues are
+        handled *before* this function and are never displaced by batching.
+        Never put already-attempted or successful pages ahead of untouched pages.
         """
         count = len(urls)
         if not count:
@@ -607,6 +615,18 @@ class SeatRefreshService:
         )
         best_index: int | None = None
         best_age: tuple[float, float] | None = None
+        matching_index: int | None = None
+        matching_age: tuple[float, float] | None = None
+        # The worker sets this only after a successful exact-subject search;
+        # isolated scheduler tests and ambiguous sources retain old behavior.
+        active_context = self._worker_context_affinity
+        if (
+            active_context is not None
+            and self._routine_batch_context == active_context
+            and self._routine_batch_count >= SEAT_ROUTINE_SUBJECT_BATCH_MAX
+        ):
+            active_context = None
+
         for offset in range(count):
             index = (cursor + offset) % count
             url = urls[index]
@@ -619,15 +639,39 @@ class SeatRefreshService:
             if best_age is None or age < best_age:
                 best_age = age
                 best_index = index
-                if age == (0.0, 0.0):
-                    break
-        if best_index is None:
+            if active_context is not None:
+                source = self._sources[url]
+                if self._seat_source_context(source) == active_context:
+                    if matching_age is None or age < matching_age:
+                        matching_index = index
+                        matching_age = age
+            elif age == (0.0, 0.0):
+                # Keep the original fast path without active subject affinity.
+                break
+        if best_index is None or best_age is None:
             return None
+        # Match only within the exact age/attempt tier. Do not revisit an
+        # already-attempted page ahead of any never-attempted eligible page.
+        if (
+            matching_index is not None and matching_age is not None
+            and matching_age == best_age
+        ):
+            best_index = matching_index
         if term is not None:
             self._other_term_cursors[term] = best_index + 1
         else:
             setattr(self, cursor_name, best_index + 1)
-        return urls[best_index]
+        chosen_url = urls[best_index]
+        chosen_context = self._seat_source_context(self._sources[chosen_url])
+        if chosen_context is None:
+            self._routine_batch_context = None
+            self._routine_batch_count = 0
+        elif chosen_context == self._routine_batch_context:
+            self._routine_batch_count += 1
+        else:
+            self._routine_batch_context = chosen_context
+            self._routine_batch_count = 1
+        return chosen_url
 
     def _next_other_term_source(self, now: float) -> str | None:
         """Give each other semester its own turn, skipping cooling pools.
@@ -721,6 +765,7 @@ class SeatRefreshService:
                 with self._session_factory() as client:
                     client.bootstrap()
                     active_context: tuple[str, str, str] | None = None
+                    self._worker_context_affinity = None
                     while not self._stop.is_set():
                         source_url = self._next_source(iteration)
                         iteration += 1
@@ -734,6 +779,7 @@ class SeatRefreshService:
                             # Do not trust any previous subject for an ambiguous
                             # source. Existing per-source recovery remains intact.
                             active_context = None
+                            self._worker_context_affinity = None
                         elif needed_context != active_context:
                             started = time.monotonic()
                             try:
@@ -747,6 +793,7 @@ class SeatRefreshService:
                                 # A context failure is a source failure, never
                                 # a successful seat refresh or removal signal.
                                 active_context = None
+                                self._worker_context_affinity = None
                                 self._record_source_failure(
                                     source_url,
                                     source,
@@ -756,6 +803,9 @@ class SeatRefreshService:
                                 self._flush_cache()
                                 continue
                             active_context = needed_context
+                            self._worker_context_affinity = active_context
+                            with self._lock:
+                                self._seat_throughput_events.append((time.time(), "context", 0))
                             LOGGER.info(
                                 "seat_subject_context_ready term=%s subject=%s",
                                 term, subject,
@@ -766,8 +816,10 @@ class SeatRefreshService:
                             # _refresh_source may have reset the session or
                             # attempted another recovery. Revalidate context.
                             active_context = None
+                            self._worker_context_affinity = None
                         self._flush_cache()
             except Exception as exc:  # noqa: BLE001 - keep the worker alive
+                self._worker_context_affinity = None
                 with self._lock:
                     self._last_error = f"{type(exc).__name__}: {exc}"
                 LOGGER.exception("seat_refresh_worker_error error=%s: %s", type(exc).__name__, exc)
@@ -857,6 +909,7 @@ class SeatRefreshService:
             while len(self._failure_history) > MAX_RETAINED_SEAT_FAILURES:
                 self._failure_history.popitem(last=False)
             self._failed_sources += 1
+            self._seat_throughput_events.append((failed_at, "failure", 0))
             self._last_error = f"{type(exc).__name__}: {exc}"
             self._last_refresh_duration_seconds = duration_seconds
 
@@ -1383,6 +1436,7 @@ class SeatRefreshService:
                 self._last_sections_updated = len(cache_rows)
                 self._last_instructor_updates = changed_instructors
                 self._successful_sources += 1
+                self._seat_throughput_events.append((completed_at, "success", len(cache_rows)))
                 self._requests_completed += 1 + loaded.expansion_count
                 self._cycle_seen.add(source_url)
                 if len(self._cycle_seen) >= len(self._sources):
@@ -1687,11 +1741,43 @@ class SeatRefreshService:
             self._term_snapshot_records = len(self._records)
             return rows
 
+    def _seat_refresh_throughput_locked(self) -> dict[str, int]:
+        """Rolling successful/failed page and section rates (service lifetime only).
+
+        Call with ``self._lock`` held. Never scan repository sections here.
+        All events are in-memory and the ring buffer is bounded.
+        """
+        now = time.time()
+        minute = now - 60.0
+        five_minutes = now - 300.0
+        while self._seat_throughput_events and self._seat_throughput_events[0][0] < five_minutes:
+            self._seat_throughput_events.popleft()
+        recent = [entry for entry in self._seat_throughput_events if entry[0] >= minute]
+        return {
+            "window_seconds": 60,
+            "successful_course_pages_last_60s": sum(kind == "success" for _, kind, _ in recent),
+            "failed_course_pages_last_60s": sum(kind == "failure" for _, kind, _ in recent),
+            "section_updates_last_60s": sum(
+                count for _, kind, count in recent if kind == "success"
+            ),
+            "subject_context_rehydrates_last_60s": sum(kind == "context" for _, kind, _ in recent),
+            "successful_course_pages_last_300s": sum(
+                kind == "success" for _, kind, _ in self._seat_throughput_events
+            ),
+            "failed_course_pages_last_300s": sum(
+                kind == "failure" for _, kind, _ in self._seat_throughput_events
+            ),
+            "subject_context_rehydrates_last_300s": sum(
+                kind == "context" for _, kind, _ in self._seat_throughput_events
+            ),
+        }
+
     def admin_status(self) -> dict[str, object]:
         public = self.public_status()
         all_tba, refreshable_tba, tba_sources = self._tba_instructor_targets()
         freshness = self._semester_freshness()
         with self._lock:
+            throughput = self._seat_refresh_throughput_locked()
             failures: list[dict[str, object]] = []
             for source_url, retained in reversed(self._failure_history.items()):
                 failed_at = float(retained.get("last_failed_timestamp") or 0.0)
@@ -1730,6 +1816,7 @@ class SeatRefreshService:
                     "tba_instructor_course_pages": len(tba_sources),
                     "instructor_cache_records": len(self._instructor_records),
                     "successful_course_refreshes": self._successful_sources,
+                    "seat_refresh_throughput": throughput,
                     "failed_course_refreshes": self._failed_sources,
                     "requests_completed": self._requests_completed,
                     "priority_sources": len(self._interests),
