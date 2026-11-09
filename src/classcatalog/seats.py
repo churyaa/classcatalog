@@ -54,8 +54,33 @@ MAX_RETAINED_SEAT_FAILURES = 100
 SLOW_SEAT_REFRESH_SECONDS = 20.0
 SEAT_FAILURE_COOLDOWN_SECONDS = 60.0
 SEAT_FAILURE_COOLDOWN_MAX_SECONDS = 1800.0
+# Confirmed source-inventory drift is retried periodically, but not every minute.
+SEAT_INVENTORY_MISMATCH_COOLDOWN_SECONDS = 1800.0
+SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS = 21600.0
 # Bound expensive per-section PeopleSoft modal requests on linked options.
 MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE = 4
+
+class SeatInventoryMismatchError(ResultParseError):
+    """A complete, correct-course-and-term grid lists other class numbers.
+
+    This is inventory-reconciliation evidence, NOT permission to change a
+    stored class number, mark it canceled, or reuse a different class's seats.
+    """
+
+    def __init__(
+        self, *, course_code: str, term: str,
+        expected_class_numbers: set[str], observed_class_numbers: set[str],
+    ) -> None:
+        self.course_code = course_code
+        self.term = term
+        self.expected_class_numbers = tuple(sorted(expected_class_numbers))
+        self.observed_class_numbers = tuple(sorted(observed_class_numbers))
+        super().__init__(
+            "The course-information page contains none of the expected class numbers. "
+            f"Course={course_code}, term={term}, "
+            f"expected={self.expected_class_numbers}, observed={self.observed_class_numbers}."
+        )
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -657,12 +682,24 @@ class SeatRefreshService:
                 if existing and existing.get("first_failed_at")
                 else failed_at_iso
             )
-            # Consecutive failures get a 1/2/4/... minute cooldown,
-            # capped at 30 minutes. Manual requests bypass it.
-            streak = self._source_failure_streak.get(source_url, 0) + 1
+            # Different failure categories should not inherit each other's
+            # retry streak. An admin manual request still bypasses the cooldown.
+            previous_type = str(existing.get("error_type")) if existing else None
+            streak = (self._source_failure_streak.get(source_url, 0) + 1
+                      if previous_type == type(exc).__name__ else 1)
             self._source_failure_streak[source_url] = streak
-            delay = min(SEAT_FAILURE_COOLDOWN_MAX_SECONDS,
-                        SEAT_FAILURE_COOLDOWN_SECONDS * (2 ** min(streak - 1, 6)))
+            if isinstance(exc, SeatInventoryMismatchError):
+                # Start at 30 minutes, then 1h / 2h / 4h / 6h max.
+                delay = min(SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS,
+                            SEAT_INVENTORY_MISMATCH_COOLDOWN_SECONDS * (2 ** min(streak - 1, 4)))
+                # Record observed changes for read-only inventory review.
+                # Never alter live section seats or the source inventory.
+                self._missing_numbers_by_source[source_url] = set(exc.expected_class_numbers)
+                self._unlisted_numbers_by_source[source_url] = set(exc.observed_class_numbers)
+                self._dirty = True
+            else:
+                delay = min(SEAT_FAILURE_COOLDOWN_MAX_SECONDS,
+                            SEAT_FAILURE_COOLDOWN_SECONDS * (2 ** min(streak - 1, 6)))
             next_retry = failed_at + delay
             self._source_retry_after[source_url] = next_retry
             for name in self._source_term_names.get(source_url, ()):
@@ -677,6 +714,14 @@ class SeatRefreshService:
                 "last_failed_timestamp": failed_at,
                 "error_type": type(exc).__name__,
                 "detail": str(exc),
+                "expected_class_numbers": (
+                    list(exc.expected_class_numbers)
+                    if isinstance(exc, SeatInventoryMismatchError) else []
+                ),
+                "observed_class_numbers": (
+                    list(exc.observed_class_numbers)
+                    if isinstance(exc, SeatInventoryMismatchError) else []
+                ),
                 "occurrences": occurrences,
                 "retry_after_at": datetime.fromtimestamp(next_retry, tz=timezone.utc).isoformat(),
                 "last_duration_seconds": round(duration_seconds, 3),
@@ -688,16 +733,21 @@ class SeatRefreshService:
             self._last_error = f"{type(exc).__name__}: {exc}"
             self._last_refresh_duration_seconds = duration_seconds
 
-        LOGGER.error(
-            "seat_refresh_failed course=%s source=%s occurrences=%s duration_seconds=%.2f error=%s: %s",
-            ", ".join(course_codes),
-            source_url,
-            occurrences,
-            duration_seconds,
-            type(exc).__name__,
-            exc,
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
+        if isinstance(exc, SeatInventoryMismatchError):
+            # Known inventory drift should not flood journald with tracebacks.
+            LOGGER.warning(
+                "seat_inventory_mismatch course=%s term=%s source=%s "
+                "occurrences=%s retry_seconds=%.0f expected=%s observed=%s",
+                exc.course_code, exc.term, source_url, occurrences, delay,
+                exc.expected_class_numbers, exc.observed_class_numbers,
+            )
+        else:
+            LOGGER.error(
+                "seat_refresh_failed course=%s source=%s occurrences=%s duration_seconds=%.2f error=%s: %s",
+                ", ".join(course_codes), source_url, occurrences,
+                duration_seconds, type(exc).__name__, exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     def _parse_expected_source_page(self, loaded, source: SeatSource):
         """Parse and validate that PeopleSoft returned the expected course grid.
@@ -726,6 +776,30 @@ class SeatRefreshService:
             action.class_number for action in find_class_number_actions(loaded.html)
         )
         if expected_schedules and returned_schedules.isdisjoint(expected_schedules):
+            # The URL's STRM/term_code is not independent proof: PeopleSoft's
+            # parsed term_code comes from the URL query. Require the displayed
+            # term, exact course, complete grid, and actual visible option rows.
+            term_names = self._source_term_names.get(source.url, ())
+            expected_term_codes = set(source.schedule_to_term.values())
+            parsed_term_code = getattr(parsed, "term_code", None)
+            safe_inventory_evidence = (
+                bool(returned_schedules)
+                and bool(parsed.options)
+                and getattr(parsed, "options_complete", False) is True
+                and len(term_names) == 1
+                and str(getattr(parsed, "term", "")).strip().casefold()
+                    == term_names[0].casefold()
+                and len(expected_term_codes) == 1
+                and (not parsed_term_code or parsed_term_code in expected_term_codes)
+            )
+            if safe_inventory_evidence:
+                raise SeatInventoryMismatchError(
+                    course_code=parsed.course_code,
+                    term=term_names[0],
+                    expected_class_numbers=expected_schedules,
+                    observed_class_numbers=returned_schedules,
+                )
+            # Incomplete/wrong-term/empty grids still need session recovery.
             raise ResultParseError(
                 "The course-information page contains none of the expected class numbers."
             )
@@ -857,6 +931,10 @@ class SeatRefreshService:
             try:
                 loaded = client.fetch_course_info_page(effective_url)
                 parsed = self._parse_expected_source_page(loaded, source)
+            except SeatInventoryMismatchError:
+                # A verified complete grid cannot be repaired by repeating the
+                # same stale URL with a fresh PeopleSoft session.
+                raise
             except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError) as exc:
                 direct_error = exc
                 client.reset_public_session()
@@ -864,6 +942,8 @@ class SeatRefreshService:
                 try:
                     loaded = client.fetch_course_info_page(effective_url)
                     parsed = self._parse_expected_source_page(loaded, source)
+                except SeatInventoryMismatchError:
+                    raise
                 except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError):
                     if source.recovery_detail_url is None:
                         raise direct_error
@@ -1096,9 +1176,10 @@ class SeatRefreshService:
                         cleaned.intersection_update(source.schedule_to_term)
                     if cleaned:
                         destination[url] = cleaned
-        generated = _parse_iso_timestamp(payload.get("updated_at"))
-        if generated is not None:
-            self._last_success_at = generated
+        # A cache write can now contain inventory-drift evidence without any
+        # successful seat fetch. Never misreport that write as a live refresh.
+        if self._source_last_success:
+            self._last_success_at = max(self._source_last_success.values())
 
     def _apply_cached_records(self) -> None:
         updates: dict[tuple[str, str], dict[str, object]] = {}
@@ -1129,12 +1210,19 @@ class SeatRefreshService:
             }
             sources = {
                 url: {
-                    "last_success_at": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
+                    "last_success_at": (
+                        datetime.fromtimestamp(self._source_last_success[url], tz=timezone.utc).isoformat()
+                        if url in self._source_last_success else None
+                    ),
                     "resolved_url": self._resolved_url_by_source.get(url),
                     "missing_class_numbers": sorted(self._missing_numbers_by_source.get(url, ())),
                     "unlisted_class_numbers": sorted(self._unlisted_numbers_by_source.get(url, ())),
                 }
-                for url, ts in self._source_last_success.items()
+                for url in (
+                    self._source_last_success.keys()
+                    | self._missing_numbers_by_source.keys()
+                    | self._unlisted_numbers_by_source.keys()
+                )
             }
             payload = {
                 "schema_version": SEAT_CACHE_SCHEMA_VERSION,
@@ -1376,6 +1464,11 @@ class SeatRefreshService:
                     "seat_failures": failures,
                     "seat_failure_retention_limit": MAX_RETAINED_SEAT_FAILURES,
                     "inventory_drift": self.inventory_drift_status(),
+                    "inventory_mismatch_sources_since_start": sum(
+                        1 for failure in self._failure_history.values()
+                        if failure.get("error_type") == "SeatInventoryMismatchError"
+                        and not failure.get("resolved", False)
+                    ),
                     "request_delay_seconds": self.request_delay_seconds,
                     "semester_freshness": [
                         dict(row,
