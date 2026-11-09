@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Event, RLock, Thread
 import time
 from typing import Mapping, Sequence
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -59,6 +59,8 @@ SEAT_FAILURE_COOLDOWN_MAX_SECONDS = 1800.0
 # Confirmed source-inventory drift is retried periodically, but not every minute.
 SEAT_INVENTORY_MISMATCH_COOLDOWN_SECONDS = 1800.0
 SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS = 21600.0
+# Allow at most one expensive empty-page fresh-subject recovery every two minutes.
+SEAT_EMPTY_GRID_RECOVERY_GLOBAL_INTERVAL_SECONDS = 120.0
 # Bound expensive per-section PeopleSoft modal requests on linked options.
 MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE = 4
 
@@ -84,6 +86,29 @@ class SeatInventoryMismatchError(ResultParseError):
             "The course-information page contains none of the expected class numbers. "
             f"Course={course_code}, term={term}, reason={reason}, "
             f"expected={self.expected_class_numbers}, observed={self.observed_class_numbers}."
+        )
+
+
+class SeatUnverifiedEmptyGridError(ResultParseError):
+    """Empty course page was not independently verified as missing inventory.
+
+    Preserve historical seats and do NOT create disappearance evidence. This
+    happens when fresh discovery is unavailable, throttled, or inconclusive.
+    """
+
+    def __init__(
+        self, *, course_code: str, term: str,
+        expected_class_numbers: set[str], recovery_status: str,
+    ) -> None:
+        self.course_code = course_code
+        self.term = term
+        self.reason = "no_scheduled_classes"
+        self.recovery_status = recovery_status
+        self.expected_class_numbers = tuple(sorted(expected_class_numbers))
+        self.observed_class_numbers: tuple[str, ...] = ()
+        super().__init__(
+            f"Unverified empty course listing for {course_code}, term={term}, "
+            f"recovery_status={recovery_status}. No missing-section conclusion."
         )
 
 
@@ -324,6 +349,8 @@ class SeatRefreshService:
         self._term_snapshot_built_at = 0.0
         self._term_snapshot_records = -1
         self._resolved_url_by_source: dict[str, str] = {}
+        self._last_empty_recovery_attempt_monotonic = float("-inf")
+        self._empty_grid_recovery_successes = 0
         # Inventory signals are *not* evidence sufficient to hide a class.
         # Persist per-source only, bounded by the refreshable source count.
         self._missing_numbers_by_source: dict[str, set[str]] = {}
@@ -709,14 +736,20 @@ class SeatRefreshService:
             streak = (self._source_failure_streak.get(source_url, 0) + 1
                       if previous_type == type(exc).__name__ else 1)
             self._source_failure_streak[source_url] = streak
-            if isinstance(exc, SeatInventoryMismatchError):
-                # Start at 30 minutes, then 1h / 2h / 4h / 6h max.
+            if isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError)):
+                # Empty-but-unverified pages also use a long cooldown, preventing
+                # repeated expensive recoveries while SDSU's state is inconsistent.
                 delay = min(SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS,
                             SEAT_INVENTORY_MISMATCH_COOLDOWN_SECONDS * (2 ** min(streak - 1, 4)))
-                # Record observed changes for read-only inventory review.
-                # Never alter live section seats or the source inventory.
-                self._missing_numbers_by_source[source_url] = set(exc.expected_class_numbers)
-                self._unlisted_numbers_by_source[source_url] = set(exc.observed_class_numbers)
+                if isinstance(exc, SeatInventoryMismatchError):
+                    # Only an independently trustworthy grid supplies inventory evidence.
+                    self._missing_numbers_by_source[source_url] = set(exc.expected_class_numbers)
+                    self._unlisted_numbers_by_source[source_url] = set(exc.observed_class_numbers)
+                else:
+                    # Older empty-grid patches may have persisted false missing flags.
+                    # This response proves neither removal nor a replacement section.
+                    self._missing_numbers_by_source.pop(source_url, None)
+                    self._unlisted_numbers_by_source.pop(source_url, None)
                 self._dirty = True
             else:
                 delay = min(SEAT_FAILURE_COOLDOWN_MAX_SECONDS,
@@ -736,15 +769,22 @@ class SeatRefreshService:
                 "error_type": type(exc).__name__,
                 "detail": str(exc),
                 "inventory_reason": (
-                    exc.reason if isinstance(exc, SeatInventoryMismatchError) else None
+                    exc.reason if isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError))
+                    else None
+                ),
+                "empty_recovery_status": (
+                    exc.recovery_status if isinstance(exc, SeatUnverifiedEmptyGridError)
+                    else None
                 ),
                 "expected_class_numbers": (
                     list(exc.expected_class_numbers)
-                    if isinstance(exc, SeatInventoryMismatchError) else []
+                    if isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError))
+                    else []
                 ),
                 "observed_class_numbers": (
                     list(exc.observed_class_numbers)
-                    if isinstance(exc, SeatInventoryMismatchError) else []
+                    if isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError))
+                    else []
                 ),
                 "occurrences": occurrences,
                 "retry_after_at": datetime.fromtimestamp(next_retry, tz=timezone.utc).isoformat(),
@@ -764,6 +804,13 @@ class SeatRefreshService:
                 "occurrences=%s retry_seconds=%.0f reason=%s expected=%s observed=%s",
                 exc.course_code, exc.term, source_url, occurrences, delay,
                 exc.reason, exc.expected_class_numbers, exc.observed_class_numbers,
+            )
+        elif isinstance(exc, SeatUnverifiedEmptyGridError):
+            LOGGER.warning(
+                "seat_empty_grid_unverified course=%s term=%s source=%s "
+                "occurrences=%s retry_seconds=%.0f recovery_status=%s expected=%s",
+                exc.course_code, exc.term, source_url, occurrences, delay,
+                exc.recovery_status, exc.expected_class_numbers,
             )
         else:
             LOGGER.error(
@@ -947,6 +994,133 @@ class SeatRefreshService:
                 "source_url": source.url,
             }
 
+    def _recover_explicit_empty_grid(
+        self, client: SdsuPeopleSoftSession, source_url: str, source: SeatSource,
+    ):
+        """Try fresh exact-subject discovery once, without trusting an empty URL.
+
+        Only a unique hit for the recorded course offering and a matching,
+        complete detail grid can refresh seats. A missing/ambiguous result is
+        *unverified*, never a reason to mark stored sections removed.
+        """
+        course_code = source.course_codes[0] if source.course_codes else "Unknown course"
+        term = source.recovery_term or (self._source_term_names.get(source_url, ("",))[0])
+        expected = set(source.schedule_to_term)
+
+        def unverified(status: str) -> SeatUnverifiedEmptyGridError:
+            return SeatUnverifiedEmptyGridError(
+                course_code=course_code, term=term,
+                expected_class_numbers=expected, recovery_status=status,
+            )
+
+        if (
+            len(source.course_codes) != 1 or not source.recovery_detail_url
+            or not source.recovery_subject or not source.recovery_term
+            or not source.recovery_term_code
+        ):
+            raise unverified("missing_recovery_metadata")
+        if self._source_term_names.get(source_url) != (source.recovery_term,):
+            raise unverified("ambiguous_source_term")
+
+        # A source-level 30m+ cooldown and this global guard bound costs even
+        # when thousands of saved URLs return misleading empty course grids.
+        with self._lock:
+            now = time.monotonic()
+            if (now - self._last_empty_recovery_attempt_monotonic
+                    < SEAT_EMPTY_GRID_RECOVERY_GLOBAL_INTERVAL_SECONDS):
+                raise unverified("global_rate_limit")
+            self._last_empty_recovery_attempt_monotonic = now
+
+        try:
+            pages = client.rehydrate_subject_context(
+                term=source.recovery_term,
+                term_code=source.recovery_term_code,
+                subject=source.recovery_subject,
+            )
+            result = client.parse_subject_pages(pages)
+            if (
+                not result.complete or result.term != source.recovery_term
+                or result.term_code != source.recovery_term_code
+                or result.subject != source.recovery_subject
+            ):
+                raise unverified("incomplete_or_wrong_subject_search")
+
+            query = parse_qs(urlparse(source.recovery_detail_url).query)
+            expected_id = (query.get("CRSE_ID") or [""])[0]
+            expected_offer = (query.get("CRSE_OFFER_NBR") or [""])[0]
+            expected_career = (query.get("ACAD_CAREER") or [""])[0]
+            if not expected_id or not expected_offer:
+                raise unverified("missing_course_identity")
+            candidates = [
+                hit for hit in result.courses
+                if hit.course_code == course_code
+                and hit.term == source.recovery_term
+                and hit.term_code == source.recovery_term_code
+                and hit.subject == source.recovery_subject
+                and str(hit.crse_id or "") == expected_id
+                and str(hit.crse_offer_nbr or "") == expected_offer
+                and (not expected_career or not hit.acad_career
+                     or str(hit.acad_career) == expected_career)
+                and hit.detail_url
+                and (hit.section_count is None or hit.section_count > 0)
+            ]
+            if len(candidates) != 1:
+                raise unverified("course_offering_not_unique_or_missing")
+            fresh_detail_url = candidates[0].detail_url
+            fresh_parts = urlparse(fresh_detail_url)
+            fresh_host = (fresh_parts.hostname or "").casefold()
+            if not (
+                fresh_parts.scheme.casefold() == "https"
+                and (fresh_host == "sdsu.edu" or fresh_host.endswith(".sdsu.edu"))
+                and "SSR_CS_WRAP_FL.GBL" in fresh_parts.path.upper()
+            ):
+                raise unverified("unsafe_fresh_detail_url")
+            detail = client.fetch_detail_pages(fresh_detail_url)
+            loaded = type(
+                "RecoveredCourseInfoPage", (),
+                {
+                    "html": detail.course_info_html,
+                    "canonical_url": detail.course_info_url,
+                    "expansion_count": detail.course_info_expansion_count,
+                },
+            )()
+            try:
+                parsed = self._parse_expected_source_page(loaded, source)
+            except SeatInventoryMismatchError as exc:
+                if exc.reason == "no_scheduled_classes":
+                    raise unverified("fresh_detail_still_empty") from exc
+                raise
+            if (
+                parsed.course_code != course_code
+                or parsed.term.strip().casefold() != source.recovery_term.casefold()
+                or parsed.term_code != source.recovery_term_code
+                or parsed.options_complete is not True
+                or not any(
+                    str(option.class_number).strip() in expected
+                    for option in parsed.options
+                )
+            ):
+                raise unverified("fresh_detail_not_verified")
+
+            if not is_course_info_url(detail.course_info_url):
+                raise unverified("invalid_recovered_info_url")
+            with self._lock:
+                self._resolved_url_by_source[source_url] = detail.course_info_url
+                self._empty_grid_recovery_successes += 1
+                self._dirty = True
+            LOGGER.info(
+                "seat_empty_grid_recovered course=%s term=%s source=%s "
+                "matched_options=%s",
+                course_code, term, source_url,
+                sum(str(option.class_number).strip() in expected for option in parsed.options),
+            )
+            return loaded, parsed
+        except (SeatUnverifiedEmptyGridError, SeatInventoryMismatchError):
+            raise
+        except Exception as exc:
+            # Fail closed on PeopleSoft timeouts/parse faults; preserve seats.
+            raise unverified("fresh_recovery_failed") from exc
+
     def _refresh_source(self, client: SdsuPeopleSoftSession, source_url: str) -> None:
         source = self._sources[source_url]
         started_monotonic = time.monotonic()
@@ -965,10 +1139,11 @@ class SeatRefreshService:
             try:
                 loaded = client.fetch_course_info_page(effective_url)
                 parsed = self._parse_expected_source_page(loaded, source)
-            except SeatInventoryMismatchError:
-                # A verified complete grid cannot be repaired by repeating the
-                # same stale URL with a fresh PeopleSoft session.
-                raise
+            except SeatInventoryMismatchError as exc:
+                if exc.reason != "no_scheduled_classes":
+                    # Visible *different* class numbers remain genuine review evidence.
+                    raise
+                loaded, parsed = self._recover_explicit_empty_grid(client, source_url, source)
             except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError) as exc:
                 direct_error = exc
                 client.reset_public_session()
@@ -976,8 +1151,10 @@ class SeatRefreshService:
                 try:
                     loaded = client.fetch_course_info_page(effective_url)
                     parsed = self._parse_expected_source_page(loaded, source)
-                except SeatInventoryMismatchError:
-                    raise
+                except SeatInventoryMismatchError as exc:
+                    if exc.reason != "no_scheduled_classes":
+                        raise
+                    loaded, parsed = self._recover_explicit_empty_grid(client, source_url, source)
                 except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError):
                     if source.recovery_detail_url is None:
                         raise direct_error
@@ -1508,6 +1685,12 @@ class SeatRefreshService:
                         if failure.get("inventory_reason") == "no_scheduled_classes"
                         and not failure.get("resolved", False)
                     ),
+                    "unverified_empty_course_sources_since_start": sum(
+                        1 for failure in self._failure_history.values()
+                        if failure.get("error_type") == "SeatUnverifiedEmptyGridError"
+                        and not failure.get("resolved", False)
+                    ),
+                    "empty_grid_recovery_successes_since_start": self._empty_grid_recovery_successes,
                     "request_delay_seconds": self.request_delay_seconds,
                     "semester_freshness": [
                         dict(row,

@@ -114,15 +114,17 @@ def test_fin_496_explicit_empty_grid_is_classified_without_recovery(tmp_path, mo
     assert section.seat_updated_at is None
     assert section.seats_available == 10  # Do not overwrite historical seat data.
     assert URL not in service._source_last_success
-    assert service.missing_section_keys() == {"2273::11525"}
+    assert service.missing_section_keys() == set()
     assert service.unlisted_source_urls() == set()
-    assert service.missing_number_source_urls() == {URL}
+    assert service.missing_number_source_urls() == set()
 
     admin = service.admin_status()
-    assert admin["inventory_mismatch_sources_since_start"] == 1
+    assert admin["inventory_mismatch_sources_since_start"] == 0
     assert admin["inventory_empty_course_sources_since_start"] == 1
+    assert admin["unverified_empty_course_sources_since_start"] == 1
     failure = admin["seat_failures"][0]
-    assert failure["error_type"] == "SeatInventoryMismatchError"
+    assert failure["error_type"] == "SeatUnverifiedEmptyGridError"
+    assert failure["empty_recovery_status"] == "missing_recovery_metadata"
     assert failure["inventory_reason"] == "no_scheduled_classes"
     assert failure["expected_class_numbers"] == ["11525"]
     assert failure["observed_class_numbers"] == []
@@ -130,11 +132,9 @@ def test_fin_496_explicit_empty_grid_is_classified_without_recovery(tmp_path, mo
 
     service._flush_cache(force=True)
     cached = json.loads((tmp_path / "seat_cache.json").read_text(encoding="utf-8"))
-    assert cached["sources"][URL]["last_success_at"] is None
-    assert cached["sources"][URL]["missing_class_numbers"] == ["11525"]
-    assert cached["sources"][URL]["unlisted_class_numbers"] == []
+    assert URL not in cached["sources"]
     restarted = _service(tmp_path)
-    assert restarted.missing_section_keys() == {"2273::11525"}
+    assert restarted.missing_section_keys() == set()
     assert restarted._last_success_at is None
 
 
@@ -206,7 +206,7 @@ def test_correct_class_returns_and_clears_empty_grid_signal(tmp_path, monkeypatc
     client = StubClient()
     _mock_parsed(monkeypatch, _parsed())
     service._refresh_source(client, URL)
-    assert service.missing_section_keys() == {"2273::11525"}
+    assert service.missing_section_keys() == set()
 
     _mock_parsed(monkeypatch, _parsed(number="11525"))
     client.html = "<html></html>"
