@@ -12,6 +12,8 @@ import time
 from typing import Mapping, Sequence
 from urllib.parse import urlencode, urlparse
 
+from bs4 import BeautifulSoup
+
 from classcatalog.instructors import (
     clean_live_instructor_name,
     load_instructor_cache,
@@ -61,28 +63,47 @@ SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS = 21600.0
 MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE = 4
 
 class SeatInventoryMismatchError(ResultParseError):
-    """A complete, correct-course-and-term grid lists other class numbers.
+    """Correct-course-and-term evidence disagrees with stored class inventory.
 
-    This is inventory-reconciliation evidence, NOT permission to change a
-    stored class number, mark it canceled, or reuse a different class's seats.
+    Either a complete grid displays other class numbers, or SDSU explicitly
+    says "No scheduled classes" in the course option message field. This is a
+    review signal, NOT permission to hide/remove classes or change their seats.
     """
 
     def __init__(
         self, *, course_code: str, term: str,
         expected_class_numbers: set[str], observed_class_numbers: set[str],
+        reason: str = "different_class_numbers",
     ) -> None:
         self.course_code = course_code
         self.term = term
+        self.reason = reason
         self.expected_class_numbers = tuple(sorted(expected_class_numbers))
         self.observed_class_numbers = tuple(sorted(observed_class_numbers))
         super().__init__(
             "The course-information page contains none of the expected class numbers. "
-            f"Course={course_code}, term={term}, "
+            f"Course={course_code}, term={term}, reason={reason}, "
             f"expected={self.expected_class_numbers}, observed={self.observed_class_numbers}."
         )
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _has_explicit_no_scheduled_classes_message(html: str) -> bool:
+    """Recognize SDSU's *course-option* empty state, not generic page text.
+
+    The page also contains hidden widgets labeled 'No results to display'.
+    Only SSR_CLSRCH_F_WK_SSR_MSG_TEXT is suitable evidence that the current
+    course view explicitly lists no scheduled classes. Even this is only a
+    review signal: PeopleSoft filters may be responsible for an empty view.
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    status = soup.find(id='SSR_CLSRCH_F_WK_SSR_MSG_TEXT')
+    if status is None:
+        return False
+    message = ' '.join(status.get_text(' ', strip=True).split()).casefold()
+    return message == 'no scheduled classes'
 
 
 def _utc_now() -> str:
@@ -714,6 +735,9 @@ class SeatRefreshService:
                 "last_failed_timestamp": failed_at,
                 "error_type": type(exc).__name__,
                 "detail": str(exc),
+                "inventory_reason": (
+                    exc.reason if isinstance(exc, SeatInventoryMismatchError) else None
+                ),
                 "expected_class_numbers": (
                     list(exc.expected_class_numbers)
                     if isinstance(exc, SeatInventoryMismatchError) else []
@@ -737,9 +761,9 @@ class SeatRefreshService:
             # Known inventory drift should not flood journald with tracebacks.
             LOGGER.warning(
                 "seat_inventory_mismatch course=%s term=%s source=%s "
-                "occurrences=%s retry_seconds=%.0f expected=%s observed=%s",
+                "occurrences=%s retry_seconds=%.0f reason=%s expected=%s observed=%s",
                 exc.course_code, exc.term, source_url, occurrences, delay,
-                exc.expected_class_numbers, exc.observed_class_numbers,
+                exc.reason, exc.expected_class_numbers, exc.observed_class_numbers,
             )
         else:
             LOGGER.error(
@@ -778,13 +802,19 @@ class SeatRefreshService:
         if expected_schedules and returned_schedules.isdisjoint(expected_schedules):
             # The URL's STRM/term_code is not independent proof: PeopleSoft's
             # parsed term_code comes from the URL query. Require the displayed
-            # term, exact course, complete grid, and actual visible option rows.
+            # term and complete grid. An empty grid is meaningful ONLY when the
+            # course-option status field explicitly says 'No scheduled classes'.
             term_names = self._source_term_names.get(source.url, ())
             expected_term_codes = set(source.schedule_to_term.values())
             parsed_term_code = getattr(parsed, "term_code", None)
+            empty_listing = (
+                not returned_schedules
+                and not parsed.options
+                and _has_explicit_no_scheduled_classes_message(loaded.html)
+            )
+            visible_different_classes = bool(returned_schedules) and bool(parsed.options)
             safe_inventory_evidence = (
-                bool(returned_schedules)
-                and bool(parsed.options)
+                (visible_different_classes or empty_listing)
                 and getattr(parsed, "options_complete", False) is True
                 and len(term_names) == 1
                 and str(getattr(parsed, "term", "")).strip().casefold()
@@ -798,8 +828,12 @@ class SeatRefreshService:
                     term=term_names[0],
                     expected_class_numbers=expected_schedules,
                     observed_class_numbers=returned_schedules,
+                    reason=(
+                        "no_scheduled_classes" if empty_listing
+                        else "different_class_numbers"
+                    ),
                 )
-            # Incomplete/wrong-term/empty grids still need session recovery.
+            # Empty/ambiguous/incomplete/wrong-term grids still need recovery.
             raise ResultParseError(
                 "The course-information page contains none of the expected class numbers."
             )
@@ -1467,6 +1501,11 @@ class SeatRefreshService:
                     "inventory_mismatch_sources_since_start": sum(
                         1 for failure in self._failure_history.values()
                         if failure.get("error_type") == "SeatInventoryMismatchError"
+                        and not failure.get("resolved", False)
+                    ),
+                    "inventory_empty_course_sources_since_start": sum(
+                        1 for failure in self._failure_history.values()
+                        if failure.get("inventory_reason") == "no_scheduled_classes"
                         and not failure.get("resolved", False)
                     ),
                     "request_delay_seconds": self.request_delay_seconds,
