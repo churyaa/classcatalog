@@ -689,12 +689,38 @@ class SeatRefreshService:
                 self._preferred_sources, "_preferred_cursor", now
             )
 
+    @staticmethod
+    def _seat_source_context(source: SeatSource) -> tuple[str, str, str] | None:
+        """Term, STRM, subject required to make stored Fluid detail URLs usable.
+
+        Without this context, PeopleSoft can return an unrelated component or
+        an empty course grid from an otherwise valid saved course-info URL.
+        Do not guess a subject for cross-listed/multi-term sources.
+        """
+        if (
+            len(source.course_codes) == 1
+            and source.recovery_term
+            and source.recovery_term_code
+            and source.recovery_subject
+        ):
+            return (
+                source.recovery_term,
+                source.recovery_term_code,
+                source.recovery_subject,
+            )
+        return None
+
     def _run(self) -> None:
+        # SEAT_WORKER_SUBJECT_CONTEXT_V1: prime PeopleSoft before stored URLs.
+        # Preserve manual requests, student interest, and the existing 4:1
+        # semester scheduler. Only reuse context for consecutive matching
+        # term/subject requests in the *same* live PeopleSoft session.
         iteration = 0
         while not self._stop.is_set():
             try:
                 with self._session_factory() as client:
                     client.bootstrap()
+                    active_context: tuple[str, str, str] | None = None
                     while not self._stop.is_set():
                         source_url = self._next_source(iteration)
                         iteration += 1
@@ -702,9 +728,46 @@ class SeatRefreshService:
                             self._wake.wait(5.0)
                             self._wake.clear()
                             continue
+                        source = self._sources[source_url]
+                        needed_context = self._seat_source_context(source)
+                        if needed_context is None:
+                            # Do not trust any previous subject for an ambiguous
+                            # source. Existing per-source recovery remains intact.
+                            active_context = None
+                        elif needed_context != active_context:
+                            started = time.monotonic()
+                            try:
+                                term, term_code, subject = needed_context
+                                client.rehydrate_subject_context(
+                                    term=term,
+                                    term_code=term_code,
+                                    subject=subject,
+                                )
+                            except Exception as exc:
+                                # A context failure is a source failure, never
+                                # a successful seat refresh or removal signal.
+                                active_context = None
+                                self._record_source_failure(
+                                    source_url,
+                                    source,
+                                    exc,
+                                    duration_seconds=time.monotonic() - started,
+                                )
+                                self._flush_cache()
+                                continue
+                            active_context = needed_context
+                            LOGGER.info(
+                                "seat_subject_context_ready term=%s subject=%s",
+                                term, subject,
+                            )
+                        failures_before = self._failed_sources
                         self._refresh_source(client, source_url)
+                        if self._failed_sources != failures_before:
+                            # _refresh_source may have reset the session or
+                            # attempted another recovery. Revalidate context.
+                            active_context = None
                         self._flush_cache()
-            except Exception as exc:  # noqa: BLE001 - worker must stay alive after upstream/session faults
+            except Exception as exc:  # noqa: BLE001 - keep the worker alive
                 with self._lock:
                     self._last_error = f"{type(exc).__name__}: {exc}"
                 LOGGER.exception("seat_refresh_worker_error error=%s: %s", type(exc).__name__, exc)
