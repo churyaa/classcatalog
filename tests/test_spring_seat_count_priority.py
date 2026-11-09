@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 from classcatalog.repository import CourseRepository, SAMPLE_DATA_PATH
@@ -108,9 +109,16 @@ def test_manual_refresh_still_overrides_spring_first(tmp_path):
 def test_recently_viewed_other_term_can_still_be_prioritized(tmp_path):
     service, urls = _service(tmp_path)
     assert service.register_interest(('52003',)) == 1
-    # The existing priority mechanism checks viewed classes every fifth turn.
+    # Viewed courses now preempt routine batching at the next request boundary.
     assert service._next_source(0) == urls['fall']
+    # The real worker records the attempt inside _refresh_source before its
+    # next scheduling decision. Simulate that step so the 10-minute cadence
+    # prevents immediately selecting the same viewed class again.
+    service._source_last_attempt[urls['fall']] = time.time()
     assert service._next_source(1) in service._preferred_sources
+    # When the priority cadence expires, viewed work is eligible again.
+    service._source_last_attempt[urls['fall']] -= service.priority_interval_seconds + 1
+    assert service._next_source(2) == urls['fall']
 
 
 def test_env_preferred_term_override_and_fallback(monkeypatch, tmp_path):

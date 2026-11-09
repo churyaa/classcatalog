@@ -116,6 +116,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Max routine pages in a row from one semester + subject before affinity pauses.
 SEAT_ROUTINE_SUBJECT_BATCH_MAX = 8
+# SEAT_BOUNDED_SUBJECT_BATCH_V2: limit the age gap and overtaking cost per batch.
+SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS = 900.0
+SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES = 12
 
 
 def _has_explicit_no_scheduled_classes_message(html: str) -> bool:
@@ -599,12 +602,13 @@ class SeatRefreshService:
         *,
         term: str | None = None,
     ) -> str | None:
-        """Choose an oldest-eligible page, batching equal-age subjects.
+        """Choose oldest eligible work, with bounded same-subject affinity.
 
-        Respect the existing Spring/other term allocation: only choose within
-        the pool the fairness scheduler assigned. Active/manual queues are
-        handled *before* this function and are never displaced by batching.
-        Never put already-attempted or successful pages ahead of untouched pages.
+        Spring/other allocation is done by _next_source and is unchanged.
+        Manual and viewed requests preempt this routine selection entirely.
+        Never advance an already-successful page ahead of a never-successful
+        page. Within a single freshness tier, permit at most a short, bounded
+        bypass of similarly aged pages to avoid repeated PeopleSoft rehydrates.
         """
         count = len(urls)
         if not count:
@@ -617,8 +621,7 @@ class SeatRefreshService:
         best_age: tuple[float, float] | None = None
         matching_index: int | None = None
         matching_age: tuple[float, float] | None = None
-        # The worker sets this only after a successful exact-subject search;
-        # isolated scheduler tests and ambiguous sources retain old behavior.
+        eligible_ages: list[tuple[float, float]] = []
         active_context = self._worker_context_affinity
         if (
             active_context is not None
@@ -640,28 +643,45 @@ class SeatRefreshService:
                 best_age = age
                 best_index = index
             if active_context is not None:
-                source = self._sources[url]
-                if self._seat_source_context(source) == active_context:
+                eligible_ages.append(age)
+                if self._seat_source_context(self._sources[url]) == active_context:
                     if matching_age is None or age < matching_age:
                         matching_index = index
                         matching_age = age
             elif age == (0.0, 0.0):
-                # Keep the original fast path without active subject affinity.
+                # Original fast path when there is no verified session affinity.
                 break
+
         if best_index is None or best_age is None:
             return None
-        # Match only within the exact age/attempt tier. Do not revisit an
-        # already-attempted page ahead of any never-attempted eligible page.
-        if (
-            matching_index is not None and matching_age is not None
-            and matching_age == best_age
-        ):
-            best_index = matching_index
+        original_best_index = best_index
+        if matching_index is not None and matching_age is not None:
+            # A source with no prior successful seat fetch must never be
+            # bypassed by one that has already succeeded. Those two groups
+            # correspond to distinct freshness tiers.
+            if best_age[0] == 0.0:
+                same_tier = matching_age[0] == 0.0
+                age_gap = matching_age[1] - best_age[1]
+            else:
+                same_tier = matching_age[0] > 0.0
+                age_gap = matching_age[0] - best_age[0]
+            if (
+                same_tier
+                and 0.0 <= age_gap <= SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS
+                and sum(age < matching_age for age in eligible_ages)
+                    <= SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES
+            ):
+                best_index = matching_index
+
         if term is not None:
             self._other_term_cursors[term] = best_index + 1
         else:
             setattr(self, cursor_name, best_index + 1)
         chosen_url = urls[best_index]
+        if best_index != original_best_index:
+            # Selection events are not successful refresh events: report them
+            # separately in the admin-only throughput telemetry.
+            self._seat_throughput_events.append((time.time(), "batch", 0))
         chosen_context = self._seat_source_context(self._sources[chosen_url])
         if chosen_context is None:
             self._routine_batch_context = None
@@ -693,30 +713,37 @@ class SeatRefreshService:
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
-            # Explicit admin refreshes always win, including when on cooldown.
+            # Admin requests always preempt routine batches, even on cooldown.
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
+                    self._routine_batch_context = None
+                    self._routine_batch_count = 0
+                    self._seat_throughput_events.append((now, "priority", 0))
                     return url
 
             expired = [url for url, expires in self._interests.items() if expires <= now]
             for url in expired:
                 self._interests.pop(url, None)
 
-            if iteration % 5 == 0:
-                priority = [
-                    url for url in self._interests
-                    if self._source_retry_after.get(url, 0.0) <= now
-                    and now - self._source_last_attempt.get(url, 0.0) >= self.priority_interval_seconds
-                ]
-                if priority:
-                    return min(priority, key=lambda url: self._source_last_attempt.get(url, 0.0))
+            # Check viewed courses between *every* completed page, not just
+            # once every five turns. Never interrupt an in-flight SDSU request.
+            priority = [
+                url for url in self._interests
+                if self._source_retry_after.get(url, 0.0) <= now
+                and now - self._source_last_attempt.get(url, 0.0)
+                    >= self.priority_interval_seconds
+            ]
+            if priority:
+                self._routine_batch_context = None
+                self._routine_batch_count = 0
+                self._seat_throughput_events.append((now, "priority", 0))
+                return min(priority, key=lambda url: self._source_last_attempt.get(url, 0.0))
 
             if not self._sources:
                 return None
-            # Preserve the existing 4:1 Spring/other preference while
-            # rotating *which* non-Spring semester receives each other turn.
-            # Inside each semester, favor oldest/never refreshed pages.
+            # Retain the existing 4:1 Spring-to-other *routine page* preference.
+            # Each other term retains its independent fair rotation.
             use_preferred = bool(self._preferred_sources) and (
                 not self._other_sources or self._routine_turn % 5 != 4
             )
@@ -1761,6 +1788,8 @@ class SeatRefreshService:
                 count for _, kind, count in recent if kind == "success"
             ),
             "subject_context_rehydrates_last_60s": sum(kind == "context" for _, kind, _ in recent),
+            "affinity_reorders_last_60s": sum(kind == "batch" for _, kind, _ in recent),
+            "priority_preemptions_last_60s": sum(kind == "priority" for _, kind, _ in recent),
             "successful_course_pages_last_300s": sum(
                 kind == "success" for _, kind, _ in self._seat_throughput_events
             ),
@@ -1769,6 +1798,12 @@ class SeatRefreshService:
             ),
             "subject_context_rehydrates_last_300s": sum(
                 kind == "context" for _, kind, _ in self._seat_throughput_events
+            ),
+            "affinity_reorders_last_300s": sum(
+                kind == "batch" for _, kind, _ in self._seat_throughput_events
+            ),
+            "priority_preemptions_last_300s": sum(
+                kind == "priority" for _, kind, _ in self._seat_throughput_events
             ),
         }
 
