@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import random
 import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Final, Self
 from urllib.parse import parse_qs, urlparse
@@ -68,6 +70,7 @@ from classcatalog.scraping.facet_parser import (
     find_open_classes_only_facet,
     find_subject_facet,
 )
+from classcatalog.scraping.partition_cache import PartitionBranchCache
 from classcatalog.scraping.models import CourseSearchHit, SubjectScrapeResult
 from classcatalog.scraping.parser import (
     CourseInfoUrlNotFound,
@@ -159,6 +162,11 @@ class SdsuHttpConfig:
     stateful_post_recovery_attempts: int = DEFAULT_STATEFUL_POST_RECOVERY_ATTEMPTS
     in_run_state_recovery_attempts: int = DEFAULT_IN_RUN_STATE_RECOVERY_ATTEMPTS
     state_circuit_breaker_threshold: int = DEFAULT_STATE_CIRCUIT_BREAKER_THRESHOLD
+    # Disabled unless the scrape explicitly opts in to durable partition checkpoints.
+    partition_cache_dir: Path | None = None
+    partition_cache_max_age_seconds: float = 6 * 3600
+    # When enabled, move between adjacent facet paths using only live responses.
+    partition_live_navigation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +189,16 @@ class RawSubjectPartitionPage:
     html: str
     result_count: int
     capped: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _LivePartitionState:
+    term: str
+    term_code: str
+    subject: str
+    filters: tuple[tuple[str, str], ...]
+    html: str
+    url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +260,15 @@ class SdsuPeopleSoftSession:
         self._landing_html: str | None = None
         self._last_request_finished_at: float | None = None
         self._consecutive_state_failures = 0
+        self._partition_cache = (
+            PartitionBranchCache(
+                self.config.partition_cache_dir,
+                max_age_seconds=self.config.partition_cache_max_age_seconds,
+            )
+            if self.config.partition_cache_dir is not None
+            else None
+        )
+        self._live_partition_state: _LivePartitionState | None = None
 
     def __enter__(self) -> Self:
         return self
@@ -280,6 +307,8 @@ class SdsuPeopleSoftSession:
                 clear()
         self._bootstrapped = False
         self._landing_html = None
+        # A new HTTP session invalidates all previously observed Fluid component state.
+        self._live_partition_state = None
 
     def record_state_success(self) -> None:
         """Close the state-failure circuit after a structurally valid operation."""
@@ -951,11 +980,245 @@ class SdsuPeopleSoftSession:
 
         raise AssertionError("unreachable result-cap partition recovery state")
 
+    def _try_live_partition_path(
+        self,
+        *,
+        pages: RawSubjectPages,
+        filters: tuple[tuple[str, str], ...],
+    ) -> tuple[str, str] | None:
+        """Navigate a simple live path transition, or decline without HTTP traffic.
+
+        Only support descendants and changes to the last selected facet group.
+        Never remove/guess arbitrary breadcrumbs or reconstruct POSTS from cached
+        HTML. The session's active state is set exclusively from live responses.
+        """
+        if not self.config.partition_live_navigation:
+            return None
+        state = self._live_partition_state
+        if state is None or (state.term, state.term_code, state.subject) != (
+            pages.term, pages.term_code, pages.subject
+        ):
+            return None
+        previous = state.filters
+        if filters == previous:
+            return state.html, state.url
+        if filters[:len(previous)] == previous:
+            start = len(previous)
+        elif (
+            previous
+            and len(filters) >= len(previous)
+            and previous[:-1] == filters[:len(previous) - 1]
+            and previous[-1][0] == filters[len(previous) - 1][0]
+        ):
+            # Example: Graduate -> Undergraduate, or Open -> Closed.
+            start = len(previous) - 1
+        else:
+            return None
+
+        html, current_url = state.html, state.url
+        for index in range(start, len(filters)):
+            group, label = filters[index]
+            choice = find_facet_choice(html, group=group, label=label)
+            post = build_facet_choice_post(
+                html, current_url=current_url, choice=choice,
+            )
+            response = self._request(
+                "POST", post.action_url, data=post.fields,
+                headers=self._partition_headers(current_url),
+            )
+            html = normalize_people_soft_response(response.text)
+            current_url = response.url
+            applied = filters[:index + 1]
+            if any(
+                not is_facet_choice_selected(html, group=g, label=v)
+                for g, v in applied
+            ):
+                raise PeopleSoftSessionError(
+                    f"Live navigation did not retain required facets {applied!r}."
+                )
+            # A sibling change must exclude the old value; otherwise it is an
+            # overlapping multi-select branch, not a valid cap partition.
+            if (
+                index < len(previous)
+                and previous[index][0] == group
+                and previous[index][1] != label
+                and is_facet_choice_selected(
+                    html, group=group, label=previous[index][1],
+                )
+            ):
+                raise PeopleSoftSessionError(
+                    f"Live navigation retained an old sibling selection in {group}."
+                )
+            intentionally_open_only = any(
+                g.casefold() == "class status"
+                and v.casefold() in {"open classes", "open classes only"}
+                for g, v in applied
+            )
+            self._verify_partition_open_status(
+                html, intentionally_open_only=intentionally_open_only,
+            )
+            if not find_subject_facet(html, pages.subject).checked:
+                raise PeopleSoftSessionError(
+                    "Live partition navigation lost the exact Subject facet."
+                )
+
+        self._live_partition_state = _LivePartitionState(
+            pages.term, pages.term_code, pages.subject, filters, html, current_url,
+        )
+        return html, current_url
+
+    def _fetch_live_or_rebuild_partition(
+        self,
+        *,
+        pages: RawSubjectPages,
+        filters: tuple[tuple[str, str], ...],
+    ) -> tuple[str, str]:
+        """Use verified live state when safe; fall back to original fresh search.
+
+        A failed live POST leaves uncertain PeopleSoft IC state and must trigger a
+        fresh session (never replay the stale POST body). The existing fresh-path
+        implementation retains its own bounded recovery policy.
+        """
+        kwargs = {
+            "term": pages.term, "term_code": pages.term_code,
+            "subject": pages.subject, "filters": filters,
+        }
+        log = logging.getLogger("classcatalog.scraper")
+        if self.config.partition_live_navigation:
+            try:
+                live = self._try_live_partition_path(pages=pages, filters=filters)
+            except (PeopleSoftTransientError, PeopleSoftSessionError, FacetParseError) as exc:
+                log.warning(
+                    "partition_live_transition_failed subject=%r path=%r error=%s",
+                    pages.subject, filters, exc,
+                )
+                if isinstance(exc, PeopleSoftTransientError):
+                    self._cool_down_after_stateful_post_failure(exc)
+                self.reset_public_session()
+            else:
+                if live is not None:
+                    log.info(
+                        "partition_live_transition_used subject=%r path=%r",
+                        pages.subject, filters,
+                    )
+                    return live
+
+        html, url = self._fetch_subject_partition_path(**kwargs)
+        if self.config.partition_live_navigation:
+            self._live_partition_state = _LivePartitionState(
+                pages.term, pages.term_code, pages.subject, filters, html, url,
+            )
+        return html, url
+
+    def _fetch_partition_with_cache(
+        self,
+        *,
+        pages: RawSubjectPages,
+        filters: tuple[tuple[str, str], ...],
+    ) -> tuple[str, str]:
+        """Reuse a validated branch, or fetch/store it using *fresh* PeopleSoft state.
+
+        Cached HTML is NEVER fed to build_facet_choice_post(). All uncached
+        descendant requests go through _fetch_subject_partition_path(), which
+        starts again from a live exact-subject GET and constructs fresh POST data.
+        """
+        log = logging.getLogger("classcatalog.scraper")
+        cache = self._partition_cache
+        path_text = " / ".join(f"{group}={label}" for group, label in filters)
+
+        def validate(html: str, url: str, rows: int, capped: bool) -> None:
+            parsed_url, parsed_search = urlparse(url), urlparse(pages.search_url)
+            if (parsed_url.scheme, parsed_url.netloc) != (
+                parsed_search.scheme, parsed_search.netloc
+            ):
+                raise PeopleSoftSessionError("Cached partition URL origin changed.")
+            if not find_subject_facet(html, pages.subject).checked:
+                raise PeopleSoftSessionError("Cached partition lost the exact subject.")
+            for group, label in filters:
+                if not is_facet_choice_selected(html, group=group, label=label):
+                    raise PeopleSoftSessionError(
+                        f"Cached partition lost facet {group}={label!r}."
+                    )
+            intentionally_open_only = any(
+                group.casefold() == "class status"
+                and label.casefold() in {"open classes", "open classes only"}
+                for group, label in filters
+            )
+            self._verify_partition_open_status(
+                html, intentionally_open_only=intentionally_open_only,
+            )
+            if count_result_rows(html) != rows or has_result_cap_warning(html) != capped:
+                raise PeopleSoftSessionError("Cached partition row/cap metadata mismatch.")
+            # Fail closed if a result row belongs to another subject.
+            parse_result_rows(
+                html,
+                term=pages.term,
+                term_code=pages.term_code,
+                base_url=url,
+                expected_subject=pages.subject,
+                strict_subject=True,
+            )
+
+        kwargs = {
+            "term": pages.term,
+            "term_code": pages.term_code,
+            "subject": pages.subject,
+            "filters": filters,
+        }
+        if cache is not None:
+            cached = cache.load(**kwargs, validate=validate)
+            if cached is not None:
+                log.info(
+                    "partition_branch_reused subject=%r path=%r rows=%d capped=%r age_seconds=%.0f",
+                    pages.subject, path_text, cached.row_count, cached.capped,
+                    cached.age_seconds,
+                )
+                return cached.html, cached.url
+
+        log.info("partition_branch_started subject=%r path=%r", pages.subject, path_text)
+        try:
+            html, url = self._fetch_live_or_rebuild_partition(
+                pages=pages, filters=filters,
+            )
+            rows, capped = count_result_rows(html), has_result_cap_warning(html)
+            validate(html, url, rows, capped)
+        except Exception:
+            log.exception("partition_branch_failed subject=%r path=%r", pages.subject, path_text)
+            raise
+        if cache is not None:
+            try:
+                cache.save(**kwargs, html=html, url=url, row_count=rows, capped=capped)
+            except (OSError, ValueError) as exc:
+                # Cache errors must not discard correctly fetched discovery results.
+                log.warning(
+                    "partition_branch_cache_write_failed subject=%r path=%r error=%s",
+                    pages.subject, path_text, exc,
+                )
+        log.info(
+            "partition_branch_completed subject=%r path=%r rows=%d capped=%r",
+            pages.subject, path_text, rows, capped,
+        )
+        return html, url
+
     def _partition_capped_subject_pages(
         self,
         pages: RawSubjectPages,
     ) -> tuple[RawSubjectPartitionPage, ...]:
         """Recursively split a capped exact-subject page into uncapped facet leaves."""
+
+        if self.config.partition_live_navigation:
+            self._live_partition_state = None
+            if pages.exact_facet_applied:
+                # This page was fetched immediately before entering partitioning;
+                # all subsequent live POSTs derive from this response only.
+                if find_subject_facet(pages.filtered_html, pages.subject).checked:
+                    self._verify_partition_open_status(
+                        pages.filtered_html, intentionally_open_only=False,
+                    )
+                    self._live_partition_state = _LivePartitionState(
+                        pages.term, pages.term_code, pages.subject, (),
+                        pages.filtered_html, pages.search_url,
+                    )
 
         leaves: list[RawSubjectPartitionPage] = []
 
@@ -990,10 +1253,8 @@ class SdsuPeopleSoftSession:
                 branch_pages: list[tuple[tuple[tuple[str, str], ...], str, str]] = []
                 for choice in choices:
                     branch_filters = (*filters, (group, choice.label))
-                    branch_html, branch_url = self._fetch_subject_partition_path(
-                        term=pages.term,
-                        term_code=pages.term_code,
-                        subject=pages.subject,
+                    branch_html, branch_url = self._fetch_partition_with_cache(
+                        pages=pages,
                         filters=branch_filters,
                     )
                     branch_pages.append((branch_filters, branch_html, branch_url))

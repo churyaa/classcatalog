@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 
 import argparse
 import json
@@ -483,6 +484,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Directory for incremental per-subject JSON output; defaults to "
             "results/<term>/subjects/."
+        ),
+    )
+    parser.add_argument(
+        "--partition-cache-dir",
+        type=Path,
+        help=(
+            "Directory for durable, validated capped-subject partition branches. "
+            "Disabled unless explicitly supplied. Use a separate directory for "
+            "each target wave and keep it alongside its checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--partition-cache-max-age-hours",
+        type=float,
+        default=6.0,
+        help="Maximum age of a reusable partition branch (default: 6 hours).",
+    )
+    parser.add_argument(
+        "--partition-live-navigation",
+        action="store_true",
+        help=(
+            "Reuse the current verified live PeopleSoft facet response for safe "
+            "adjacent partition paths. Otherwise rebuild from a fresh search. "
+            "Disabled by default; use alongside --partition-cache-dir."
         ),
     )
     parser.add_argument("--save-fixtures", action="store_true")
@@ -1654,6 +1679,11 @@ def run(args: argparse.Namespace) -> int:
             int(args.state_circuit_breaker_threshold),
             0,
         ),
+        partition_cache_dir=args.partition_cache_dir,
+        partition_cache_max_age_seconds=max(
+            float(args.partition_cache_max_age_hours), 0.0
+        ) * 3600,
+        partition_live_navigation=bool(args.partition_live_navigation),
     )
     logger.info(
         "http_policy",
@@ -1665,6 +1695,9 @@ def run(args: argparse.Namespace) -> int:
         stateful_post_recovery_attempts=config.stateful_post_recovery_attempts,
         in_run_state_recovery_attempts=config.in_run_state_recovery_attempts,
         state_circuit_breaker_threshold=config.state_circuit_breaker_threshold,
+        partition_cache_dir=str(config.partition_cache_dir) if config.partition_cache_dir else None,
+        partition_cache_max_age_hours=config.partition_cache_max_age_seconds / 3600,
+        partition_live_navigation=config.partition_live_navigation,
     )
 
     with SdsuPeopleSoftSession(config) as client:
@@ -2055,7 +2088,7 @@ def run(args: argparse.Namespace) -> int:
                                     term=term,
                                     subject=subject,
                                     kind=(
-                                        f"partition-{leaf_number:02d}-{filter_slug}"
+                                        f"partition-{leaf_number:02d}-{filter_slug[:32]}-{hashlib.sha256(filter_slug.encode('utf-8')).hexdigest()[:12]}"
                                     ),
                                     html=partition.html,
                                 )
