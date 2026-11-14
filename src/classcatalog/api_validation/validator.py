@@ -466,10 +466,10 @@ def validate_api_sections(
             counts = Counter(section.course_code for section in repository.sections)
             course_code = min(counts, key=lambda value: (counts[value], value))
             expected = repository.search(
-                SearchFilters(query=course_code, page=1, page_size=50)
+                SearchFilters(query=f'"{course_code}"', page=1, page_size=50)
             )
             payload = _response_payload(
-                get("/api/classes", params={"q": course_code, "page_size": 50})
+                get("/api/classes", params={"q": f'"{course_code}"', "page_size": 50})
             )
             assert payload["filtered_total"] == expected.filtered_total, (
                 "Text-search total differs from direct repository filtering."
