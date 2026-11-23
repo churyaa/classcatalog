@@ -163,7 +163,8 @@ def test_last_minute_throughput_counts_real_success_and_failures(tmp_path, monke
     assert throughput["subject_context_rehydrates_last_60s"] == 1
     assert throughput["successful_course_pages_last_300s"] == 1
     assert throughput["failed_course_pages_last_300s"] == 1
-    assert "seat_refresh_throughput" not in service.public_status()
+    assert "seat_refresh_throughput" in service.public_status()
+    assert "semester_freshness" not in service.public_status()
 
 
 def test_throughput_window_excludes_old_events(tmp_path):

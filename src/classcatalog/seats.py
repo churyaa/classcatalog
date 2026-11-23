@@ -120,6 +120,8 @@ SEAT_ROUTINE_SUBJECT_BATCH_MAX = 8
 # SEAT_BOUNDED_SUBJECT_BATCH_V2: limit the age gap and overtaking cost per batch.
 SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS = 900.0
 SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES = 12
+# CLASSCATALOG_BOUNDED_VIEWED_REFRESH_V1: guarantee periodic catalog-wide progress.
+SEAT_MAX_VIEWED_BURST = 4
 
 
 def _has_explicit_no_scheduled_classes_message(html: str) -> bool:
@@ -289,6 +291,7 @@ class SeatRefreshService:
         preferred_set = set(self._preferred_sources)
         self._other_sources = tuple(url for url in self._sources if url not in preferred_set)
         self._routine_turn = 0
+        self._consecutive_viewed_selections = 0
         self._preferred_cursor = 0
         self._other_cursor = 0
         # Unique refreshable physical seats and source URLs by semester.
@@ -714,10 +717,46 @@ class SeatRefreshService:
                 return url
         return None
 
+    def _choose_viewed_source_locked(self, urls: list[str], now: float) -> str:
+        """Prefer eligible viewed pages, optionally reusing verified subject context.
+
+        The oldest eligible page wins unless a matching-context page is close in
+        age and bypasses at most the same bounded number as routine batching.
+        Caller holds self._lock; no PeopleSoft request takes place here.
+        """
+        attempts = self._source_last_attempt
+        chosen = min(urls, key=lambda url: attempts.get(url, 0.0))
+        active_context = self._worker_context_affinity
+        if active_context is not None:
+            matching = [
+                url for url in urls
+                if self._seat_source_context(self._sources[url]) == active_context
+            ]
+            if matching:
+                candidate = min(matching, key=lambda url: attempts.get(url, 0.0))
+                oldest_attempt = attempts.get(chosen, 0.0)
+                candidate_attempt = attempts.get(candidate, 0.0)
+                older_pages = sum(
+                    attempts.get(url, 0.0) < candidate_attempt for url in urls
+                )
+                if (
+                    candidate_attempt >= oldest_attempt
+                    and candidate_attempt - oldest_attempt
+                        <= SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS
+                    and older_pages <= SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES
+                ):
+                    chosen = candidate
+        # Keep a bounded burst of viewed work so routine pages make progress.
+        self._consecutive_viewed_selections += 1
+        self._routine_batch_context = None
+        self._routine_batch_count = 0
+        self._seat_throughput_events.append((now, "priority", 0))
+        return chosen
+
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
-            # Admin requests always preempt routine batches, even on cooldown.
+            # Admin requests remain absolute priority, even on cooldown.
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
@@ -730,24 +769,19 @@ class SeatRefreshService:
             for url in expired:
                 self._interests.pop(url, None)
 
-            # Check viewed courses between *every* completed page, not just
-            # once every five turns. Never interrupt an in-flight SDSU request.
-            priority = [
+            viewed = [
                 url for url in self._interests
                 if self._source_retry_after.get(url, 0.0) <= now
                 and now - self._source_last_attempt.get(url, 0.0)
                     >= self.priority_interval_seconds
             ]
-            if priority:
-                self._routine_batch_context = None
-                self._routine_batch_count = 0
-                self._seat_throughput_events.append((now, "priority", 0))
-                return min(priority, key=lambda url: self._source_last_attempt.get(url, 0.0))
+            if viewed and self._consecutive_viewed_selections < SEAT_MAX_VIEWED_BURST:
+                return self._choose_viewed_source_locked(viewed, now)
 
             if not self._sources:
                 return None
-            # Retain the existing 4:1 Spring-to-other *routine page* preference.
-            # Each other term retains its independent fair rotation.
+            # Preserve the existing 4:1 Spring-to-other *routine* ratio.
+            # One routine slot after a viewed burst prevents indefinite starvation.
             use_preferred = bool(self._preferred_sources) and (
                 not self._other_sources or self._routine_turn % 5 != 4
             )
@@ -756,13 +790,22 @@ class SeatRefreshService:
                 url = self._next_ready_routine(
                     self._preferred_sources, "_preferred_cursor", now
                 )
-                return url if url is not None else self._next_other_term_source(now)
-            url = self._next_other_term_source(now)
-            if url is not None:
-                return url
-            return self._next_ready_routine(
-                self._preferred_sources, "_preferred_cursor", now
-            )
+                selected = url if url is not None else self._next_other_term_source(now)
+            else:
+                selected = self._next_other_term_source(now)
+                if selected is None:
+                    selected = self._next_ready_routine(
+                        self._preferred_sources, "_preferred_cursor", now
+                    )
+            if selected is not None:
+                self._consecutive_viewed_selections = 0
+                self._seat_throughput_events.append((now, "routine", 0))
+                return selected
+            # If all routine sources are cooling down, do not idle when a
+            # viewed source is still eligible for a safe retry.
+            if viewed:
+                return self._choose_viewed_source_locked(viewed, now)
+            return None
 
     @staticmethod
     def _seat_source_context(source: SeatSource) -> tuple[str, str, str] | None:
@@ -1840,6 +1883,7 @@ class SeatRefreshService:
             "subject_context_rehydrates_last_60s": sum(kind == "context" for _, kind, _ in recent),
             "affinity_reorders_last_60s": sum(kind == "batch" for _, kind, _ in recent),
             "priority_preemptions_last_60s": sum(kind == "priority" for _, kind, _ in recent),
+            "routine_selections_last_60s": sum(kind == "routine" for _, kind, _ in recent),
             "successful_course_pages_last_300s": sum(
                 kind == "success" for _, kind, _ in self._seat_throughput_events
             ),
@@ -1854,6 +1898,9 @@ class SeatRefreshService:
             ),
             "priority_preemptions_last_300s": sum(
                 kind == "priority" for _, kind, _ in self._seat_throughput_events
+            ),
+            "routine_selections_last_300s": sum(
+                kind == "routine" for _, kind, _ in self._seat_throughput_events
             ),
         }
 

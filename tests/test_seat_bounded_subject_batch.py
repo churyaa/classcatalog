@@ -203,4 +203,6 @@ def test_new_metrics_stay_admin_only_and_preserve_existing_counts(tmp_path):
     assert metrics["successful_course_pages_last_60s"] == 1
     assert metrics["failed_course_pages_last_60s"] == 1
     assert metrics["subject_context_rehydrates_last_60s"] == 1
-    assert "seat_refresh_throughput" not in service.public_status()
+    # Aggregate rates are public; detailed semester/failure diagnostics remain admin-only.
+    assert "seat_refresh_throughput" in service.public_status()
+    assert "semester_freshness" not in service.public_status()
