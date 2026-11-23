@@ -154,7 +154,7 @@ def test_seat_status_reuses_cached_counts_but_keeps_live_age(monkeypatch, tmp_pa
     with service._lock:
         service._freshness_built_at -= DEFAULT_STATUS_COUNTS_CACHE_SECONDS + 1
     service.public_status()
-    assert len(calls) == 6
+    assert len(calls) == 3  # TTL rollover uses the indexed timestamps
 
     # Growing the record set must invalidate even within the TTL, keeping sums exact.
     with service._lock:
@@ -163,7 +163,7 @@ def test_seat_status_reuses_cached_counts_but_keeps_live_age(monkeypatch, tmp_pa
     assert latest["cached_sections"] == 4
     assert (latest["fresh_cached_sections"] + latest["stale_cached_sections"]
             + latest["pending_cached_sections"]) == 4
-    assert len(calls) == 10
+    assert len(calls) == 7  # direct record addition triggers a full index rebuild
     metrics = service.admin_status()
     assert metrics["seat_status_cache_hits"] >= 1
     assert metrics["seat_status_cache_misses"] >= 3
@@ -194,3 +194,67 @@ def test_health_and_seat_status_retains_public_api(tmp_path: Path):
     assert health.json()["seat_refresh"]["cached_sections"] == status.json()["cached_sections"]
     assert health.json()["terms"] >= 1
     assert status.headers["cache-control"] == "no-store"
+
+
+def test_freshness_index_updates_rows_and_throughput_without_full_recount(tmp_path: Path):
+    """Verified seat changes are visible before TTL without reparsing all records."""
+    from classcatalog.seats import SeatRefreshService
+    repository = _indexed_repository()
+    service = SeatRefreshService(
+        repository,
+        cache_path=tmp_path / "seat_cache.json",
+        instructor_cache_path=tmp_path / "instructor_cache.json",
+        request_delay_seconds=0,
+    )
+    now = datetime.now(timezone.utc)
+    key = ("2273", "44001")
+    other = ("2267", "44001")
+    with service._lock:
+        service._records = {
+            key: {"updated_at": (now - timedelta(hours=2)).isoformat()},
+            other: {"updated_at": None},
+        }
+    initial = service.public_status()
+    assert (initial["fresh_cached_sections"], initial["stale_cached_sections"],
+            initial["pending_cached_sections"]) == (0, 1, 1)
+    assert initial["seat_refresh_throughput"]["window_seconds"] == 60
+
+    with service._lock:
+        changed = {
+            key: {"updated_at": now.isoformat()},
+            other: {"updated_at": (now - timedelta(hours=1)).isoformat()},
+        }
+        service._records.update(changed)
+        service._update_freshness_index_locked(changed)
+    updated = service.public_status()
+    assert (updated["fresh_cached_sections"], updated["stale_cached_sections"],
+            updated["pending_cached_sections"]) == (1, 1, 0)
+    assert updated["cached_sections"] == 2
+
+
+def test_fast_freshness_recount_preserves_exact_threshold(tmp_path: Path, monkeypatch):
+    """Sorted timestamp boundary follows the original strict > stale semantics."""
+    from classcatalog import seats as seat_module
+    repository = _indexed_repository()
+    service = SeatRefreshService(
+        repository,
+        cache_path=tmp_path / "seat_cache.json",
+        instructor_cache_path=tmp_path / "instructor_cache.json",
+        request_delay_seconds=0,
+        stale_after_seconds=1800,
+    )
+    reference = datetime(2026, 11, 23, 23, 0, tzinfo=timezone.utc)
+    with service._lock:
+        service._records = {
+            ("2273", "44001"): {"updated_at": (reference - timedelta(seconds=1800)).isoformat()},
+            ("2273", "44002"): {"updated_at": (reference - timedelta(seconds=1801)).isoformat()},
+            ("2273", "44003"): {"updated_at": "invalid"},
+        }
+    real_time = seat_module.time.time
+    monkeypatch.setattr(seat_module.time, "time", lambda: reference.timestamp())
+    try:
+        status = service.public_status()
+    finally:
+        monkeypatch.setattr(seat_module.time, "time", real_time)
+    assert (status["fresh_cached_sections"], status["stale_cached_sections"],
+            status["pending_cached_sections"]) == (1, 1, 1)

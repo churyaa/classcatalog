@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left, insort
 from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -384,6 +385,9 @@ class SeatRefreshService:
         self._failure_history: OrderedDict[str, dict[str, object]] = OrderedDict()
         self._dirty = False
         self._last_flush_monotonic = 0.0
+        # CLASSCATALOG_SEAT_STATUS_INDEX_V1: sorted verified timestamps allow O(log n) recounts.
+        self._freshness_epochs_by_key: dict[tuple[str, str], float | None] | None = None
+        self._freshness_sorted_epochs: list[float] = []
         self._freshness_counts: tuple[int, int, int] | None = None
         self._freshness_built_at = 0.0
         self._freshness_record_total = -1
@@ -1449,6 +1453,7 @@ class SeatRefreshService:
                         self._unlisted_numbers_by_source.pop(source_url, None)
                     self._dirty = True
                 self._records.update(cache_rows)
+                self._update_freshness_index_locked(cache_rows)
                 self._source_last_success[source_url] = completed_at
                 self._source_retry_after.pop(source_url, None)
                 self._source_failure_streak.pop(source_url, None)
@@ -1598,12 +1603,57 @@ class SeatRefreshService:
             self._dirty = False
             self._last_flush_monotonic = now
 
+    def _rebuild_freshness_index_locked(self) -> None:
+        """Index persisted timestamps once; caller holds the seat-service lock."""
+        epochs = {
+            key: _parse_iso_timestamp(raw.get("updated_at"))
+            for key, raw in self._records.items()
+        }
+        self._freshness_epochs_by_key = epochs
+        self._freshness_sorted_epochs = sorted(
+            value for value in epochs.values() if value is not None
+        )
+
+    def _update_freshness_index_locked(
+        self, cache_rows: Mapping[tuple[str, str], Mapping[str, object]],
+    ) -> None:
+        """Update only refreshed records, preserving accurate freshness transitions.
+
+        An uninitialized (or externally modified) index is rebuilt lazily on
+        the next status request. Neither this index nor its floats are persisted.
+        """
+        if not cache_rows:
+            return
+        epochs = self._freshness_epochs_by_key
+        if epochs is not None:
+            ordered = self._freshness_sorted_epochs
+            for key, raw in cache_rows.items():
+                previous = epochs.get(key)
+                if previous is not None:
+                    position = bisect_left(ordered, previous)
+                    if position >= len(ordered) or ordered[position] != previous:
+                        self._freshness_epochs_by_key = None
+                        self._freshness_sorted_epochs = []
+                        break
+                    ordered.pop(position)
+                current = _parse_iso_timestamp(raw.get("updated_at"))
+                epochs[key] = current
+                if current is not None:
+                    insort(ordered, current)
+            if len(epochs) != len(self._records):
+                self._freshness_epochs_by_key = None
+                self._freshness_sorted_epochs = []
+        # Avoid reporting an old summary immediately after a verified update.
+        self._freshness_counts = None
+        self._term_snapshot = None
+
     def public_status(self) -> dict[str, object]:
         """Publish live status with short-lived cached *summary* counts.
 
         Actual section seats and last-refresh timestamps remain immediately live.
-        Count summaries are cached for at most 10 seconds, unless record count
-        changes, which also keeps fresh + stale + pending equal to cached_sections.
+        Timestamp values are indexed once and updated incrementally.
+        Summaries are cached for at most 10 seconds, or invalidated when
+        verified rows change, with fresh + stale + pending = cached_sections.
         """
         now = time.time()
         monotonic_now = time.monotonic()
@@ -1617,17 +1667,16 @@ class SeatRefreshService:
                 self._freshness_cache_hits += 1
             else:
                 recount_start = time.perf_counter()
-                fresh_cached = 0
-                stale_cached = 0
-                pending_cached = 0
-                for raw in self._records.values():
-                    updated_at = _parse_iso_timestamp(raw.get("updated_at"))
-                    if updated_at is None:
-                        pending_cached += 1
-                    elif max(0.0, now - updated_at) > self.stale_after_seconds:
-                        stale_cached += 1
-                    else:
-                        fresh_cached += 1
+                if (
+                    self._freshness_epochs_by_key is None
+                    or len(self._freshness_epochs_by_key) != len(self._records)
+                ):
+                    self._rebuild_freshness_index_locked()
+                verified = self._freshness_sorted_epochs
+                # A timestamp exactly at the threshold is still fresh.
+                stale_cached = bisect_left(verified, now - self.stale_after_seconds)
+                fresh_cached = len(verified) - stale_cached
+                pending_cached = len(self._records) - len(verified)
                 self._freshness_counts = (fresh_cached, stale_cached, pending_cached)
                 self._freshness_record_total = len(self._records)
                 self._freshness_built_at = monotonic_now
@@ -1661,6 +1710,7 @@ class SeatRefreshService:
                 "preferred_term": self.preferred_term,
                 "preferred_source_pages": len(self._preferred_sources),
                 "other_source_pages": len(self._other_sources),
+                "seat_refresh_throughput": self._seat_refresh_throughput_locked(),
             }
 
     def missing_section_keys(self) -> set[str]:
