@@ -292,6 +292,8 @@ class SeatRefreshService:
         self._other_sources = tuple(url for url in self._sources if url not in preferred_set)
         self._routine_turn = 0
         self._consecutive_viewed_selections = 0
+        # CLASSCATALOG_CONTEXT_FOLLOWUP_V1: at most one same-subject follow-up per viewed success.
+        self._context_followup_after: tuple[str, float] | None = None
         self._preferred_cursor = 0
         self._other_cursor = 0
         # Unique refreshable physical seats and source URLs by semester.
@@ -343,6 +345,15 @@ class SeatRefreshService:
             for course_code in source.course_codes:
                 normalized_code = " ".join(course_code.strip().upper().split())
                 self._source_by_course_code.setdefault(normalized_code, set()).add(url)
+        # Build once; do not rescan all 6,000+ source pages on each selection.
+        sources_by_context: dict[tuple[str, str, str], list[str]] = {}
+        for url, source in self._sources.items():
+            context = self._seat_source_context(source)
+            if context is not None:
+                sources_by_context.setdefault(context, []).append(url)
+        self._sources_by_context = {
+            context: tuple(urls) for context, urls in sources_by_context.items()
+        }
 
         self._records: dict[tuple[str, str], dict[str, object]] = {}
         self._source_last_success: dict[str, float] = {}
@@ -750,10 +761,41 @@ class SeatRefreshService:
                     chosen = candidate
         # Keep a bounded burst of viewed work so routine pages make progress.
         self._consecutive_viewed_selections += 1
+        # The next scheduler call may reuse this context only after this
+        # exact viewed source has actually completed successfully.
+        self._context_followup_after = (chosen, now)
         self._routine_batch_context = None
         self._routine_batch_count = 0
         self._seat_throughput_events.append((now, "priority", 0))
         return chosen
+
+    def _choose_context_followup_locked(
+        self, context: tuple[str, str, str], now: float,
+    ) -> str | None:
+        """Choose one stale, non-viewed page while verified context is still live.
+
+        Only the existing worker calls this, after a *successful* viewed refresh.
+        No request is issued here. Cooldowns, interest and recent attempts are
+        respected; at most one extra page can follow each viewed selection.
+        """
+        oldest: tuple[float, float] | None = None
+        selected: str | None = None
+        stale_before = now - self.stale_after_seconds
+        for url in self._sources_by_context.get(context, ()):
+            if url in self._interests:
+                continue
+            if self._source_retry_after.get(url, 0.0) > now:
+                continue
+            last_attempt = self._source_last_attempt.get(url, 0.0)
+            if now - last_attempt < self.priority_interval_seconds:
+                continue
+            last_success = self._source_last_success.get(url, 0.0)
+            if last_success > stale_before:
+                continue
+            age = (last_success, last_attempt)
+            if oldest is None or age < oldest:
+                selected, oldest = url, age
+        return selected
 
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
@@ -762,6 +804,8 @@ class SeatRefreshService:
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
+                    # Manual work always preempts and cancels any follow-up.
+                    self._context_followup_after = None
                     self._routine_batch_context = None
                     self._routine_batch_count = 0
                     self._seat_throughput_events.append((now, "priority", 0))
@@ -770,6 +814,28 @@ class SeatRefreshService:
             expired = [url for url, expires in self._interests.items() if expires <= now]
             for url in expired:
                 self._interests.pop(url, None)
+
+            # A successful viewed page may be followed by exactly one stale
+            # page in the same currently verified PeopleSoft subject.
+            followup = self._context_followup_after
+            self._context_followup_after = None
+            if followup is not None:
+                viewed_url, selected_at = followup
+                context = self._seat_source_context(self._sources[viewed_url])
+                if (
+                    context is not None
+                    and context == self._worker_context_affinity
+                    and self._source_last_success.get(viewed_url, 0.0) >= selected_at
+                ):
+                    sibling = self._choose_context_followup_locked(context, now)
+                    if sibling is not None:
+                        self._consecutive_viewed_selections = 0
+                        self._routine_batch_context = context
+                        self._routine_batch_count = 1
+                        self._routine_turn += 1
+                        self._seat_throughput_events.append((now, "routine", 0))
+                        self._seat_throughput_events.append((now, "context_followup", 0))
+                        return sibling
 
             viewed = [
                 url for url in self._interests
@@ -1925,6 +1991,9 @@ class SeatRefreshService:
             "affinity_reorders_last_60s": sum(kind == "batch" for _, kind, _ in recent),
             "priority_preemptions_last_60s": sum(kind == "priority" for _, kind, _ in recent),
             "routine_selections_last_60s": sum(kind == "routine" for _, kind, _ in recent),
+            "context_followup_selections_last_60s": sum(
+                kind == "context_followup" for _, kind, _ in recent
+            ),
             "successful_course_pages_last_300s": sum(
                 kind == "success" for _, kind, _ in self._seat_throughput_events
             ),
@@ -1942,6 +2011,9 @@ class SeatRefreshService:
             ),
             "routine_selections_last_300s": sum(
                 kind == "routine" for _, kind, _ in self._seat_throughput_events
+            ),
+            "context_followup_selections_last_300s": sum(
+                kind == "context_followup" for _, kind, _ in self._seat_throughput_events
             ),
         }
 
