@@ -381,6 +381,8 @@ class SeatRefreshService:
         self._failed_sources = 0
         # SEAT_SUBJECT_BATCH_TELEMETRY_V1: bounded in-memory telemetry and routine subject affinity.
         self._seat_throughput_events: deque[tuple[float, str, int]] = deque(maxlen=10000)
+        # Bounded, nonpersistent timing samples: one per context attempt and page call.
+        self._seat_stage_durations: deque[tuple[float, str, float]] = deque(maxlen=2000)
         self._worker_context_affinity: tuple[str, str, str] | None = None
         self._routine_batch_context: tuple[str, str, str] | None = None
         self._routine_batch_count = 0
@@ -876,6 +878,12 @@ class SeatRefreshService:
                                 )
                                 self._flush_cache()
                                 continue
+                            finally:
+                                # Include failed context preparations in timing totals.
+                                with self._lock:
+                                    self._seat_stage_durations.append((
+                                        time.time(), "context", time.monotonic() - started,
+                                    ))
                             active_context = needed_context
                             self._worker_context_affinity = active_context
                             with self._lock:
@@ -885,7 +893,15 @@ class SeatRefreshService:
                                 term, subject,
                             )
                         failures_before = self._failed_sources
-                        self._refresh_source(client, source_url)
+                        page_started = time.monotonic()
+                        try:
+                            self._refresh_source(client, source_url)
+                        finally:
+                            # Includes retries, parsing and in-page recovery.
+                            with self._lock:
+                                self._seat_stage_durations.append((
+                                    time.time(), "page", time.monotonic() - page_started,
+                                ))
                         if self._failed_sources != failures_before:
                             # _refresh_source may have reset the session or
                             # attempted another recovery. Revalidate context.
@@ -1861,7 +1877,7 @@ class SeatRefreshService:
             self._term_snapshot_records = len(self._records)
             return rows
 
-    def _seat_refresh_throughput_locked(self) -> dict[str, int]:
+    def _seat_refresh_throughput_locked(self) -> dict[str, object]:
         """Rolling successful/failed page and section rates (service lifetime only).
 
         Call with ``self._lock`` held. Never scan repository sections here.
@@ -1873,7 +1889,32 @@ class SeatRefreshService:
         while self._seat_throughput_events and self._seat_throughput_events[0][0] < five_minutes:
             self._seat_throughput_events.popleft()
         recent = [entry for entry in self._seat_throughput_events if entry[0] >= minute]
+        while self._seat_stage_durations and self._seat_stage_durations[0][0] < five_minutes:
+            self._seat_stage_durations.popleft()
+        context_seconds = [
+            seconds for _, stage, seconds in self._seat_stage_durations if stage == "context"
+        ]
+        page_seconds = [
+            seconds for _, stage, seconds in self._seat_stage_durations if stage == "page"
+        ]
         return {
+            "worker_stage_timing_last_300s": {
+                "window_seconds": 300,
+                "context_attempts": len(context_seconds),
+                "context_seconds": round(sum(context_seconds), 3),
+                "context_avg_seconds": (
+                    round(sum(context_seconds) / len(context_seconds), 3)
+                    if context_seconds else None
+                ),
+                "context_max_seconds": (round(max(context_seconds), 3) if context_seconds else None),
+                "course_page_attempts": len(page_seconds),
+                "course_page_seconds": round(sum(page_seconds), 3),
+                "course_page_avg_seconds": (
+                    round(sum(page_seconds) / len(page_seconds), 3)
+                    if page_seconds else None
+                ),
+                "course_page_max_seconds": (round(max(page_seconds), 3) if page_seconds else None),
+            },
             "window_seconds": 60,
             "successful_course_pages_last_60s": sum(kind == "success" for _, kind, _ in recent),
             "failed_course_pages_last_60s": sum(kind == "failure" for _, kind, _ in recent),
