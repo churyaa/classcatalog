@@ -223,3 +223,82 @@ def test_routine_sibling_respects_bounded_subject_batch(tmp_path):
     service._routine_batch_count = 8
     assert service._next_source(1) == urls['HIST 111']
     assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 0
+
+
+# CLASSCATALOG_VIEWED_CHAIN_CONTEXT_V1: bounded viewed -> routine -> routine.
+def test_viewed_sibling_may_get_one_more_verified_spring_followup(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    service.register_interest((nums['HIST 110'], nums['BIOL 350']))
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    mark_verified_success(service, urls['HIST 111'])
+    # The extra bounded sibling runs before the next eligible viewed page.
+    assert service._next_source(2) == urls['HIST 112']
+    metrics = service.public_status()['seat_refresh_throughput']
+    assert metrics['context_followup_selections_last_300s'] == 1
+    assert metrics['routine_context_followups_last_300s'] == 1
+    assert metrics['viewed_chain_followups_last_300s'] == 1
+    mark_verified_success(service, urls['HIST 112'])
+    # It cannot chain again. The next viewed course gets its turn.
+    assert service._next_source(3) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 1
+
+
+def test_failed_viewed_sibling_does_not_trigger_extra_context_reuse(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    service.register_interest((nums['HIST 110'], nums['BIOL 350']))
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    # Worker has not verified a success for HIST 111.
+    assert service._next_source(2) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 0
+
+
+def test_manual_preempts_and_cancels_viewed_chain(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    service.register_interest((nums['HIST 110'], nums['BIOL 350']))
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    mark_verified_success(service, urls['HIST 111'])
+    service._manual_queue.append(urls['MATH 150'])
+    assert service._next_source(2) == urls['MATH 150']
+    assert service._routine_followup_after is None
+    assert service._routine_followup_from_viewed is False
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 0
+
+
+def test_fifth_slot_blocks_viewed_chain_and_viewed_is_not_delayed(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    service._routine_turn = 3
+    service.register_interest((nums['HIST 110'], nums['BIOL 350']))
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    mark_verified_success(service, urls['HIST 111'])
+    # A fifth (non-Spring) routine slot may not be stolen.
+    assert service._next_source(2) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 0
+
+
+def test_recent_and_cooling_siblings_not_selected_for_viewed_chain(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    service.register_interest((nums['HIST 110'], nums['BIOL 350']))
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    mark_verified_success(service, urls['HIST 111'])
+    service._source_retry_after[urls['HIST 112']] = time.time() + 3600
+    assert service._next_source(2) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 0
+
+
+def test_normal_routine_pending_continuation_still_yields_to_viewed(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    service.register_interest((nums['BIOL 350'],))
+    assert service._next_source(1) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['viewed_chain_followups_last_300s'] == 0

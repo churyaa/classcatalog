@@ -296,6 +296,8 @@ class SeatRefreshService:
         self._context_followup_after: tuple[str, float] | None = None
         # CLASSCATALOG_ROUTINE_SPRING_CONTEXT_FOLLOWUP_V1: one bounded Spring routine sibling on a verified success.
         self._routine_followup_after: tuple[str, float] | None = None
+        # CLASSCATALOG_VIEWED_CHAIN_CONTEXT_V1: one extra verified Spring sibling after viewed follow-up.
+        self._routine_followup_from_viewed = False
         self._preferred_cursor = 0
         self._other_cursor = 0
         # Unique refreshable physical seats and source URLs by semester.
@@ -767,6 +769,7 @@ class SeatRefreshService:
         # exact viewed source has actually completed successfully.
         self._context_followup_after = (chosen, now)
         self._routine_followup_after = None
+        self._routine_followup_from_viewed = False
         self._routine_batch_context = None
         self._routine_batch_count = 0
         self._seat_throughput_events.append((now, "priority", 0))
@@ -800,6 +803,51 @@ class SeatRefreshService:
                 selected, oldest = url, age
         return selected
 
+    def _take_routine_context_followup_locked(self, now: float) -> str | None:
+        """Consume a single pending verified Spring sibling; never chain implicitly.
+
+        The viewed-origin exception may run before another viewed request, but
+        only for ONE sibling. Admin manual work always runs before this helper.
+        """
+        routine_followup = self._routine_followup_after
+        viewed_origin = self._routine_followup_from_viewed
+        self._routine_followup_after = None
+        self._routine_followup_from_viewed = False
+        if (
+            routine_followup is None
+            or not self._preferred_sources
+            or (self._other_sources and self._routine_turn % 5 == 4)
+        ):
+            return None
+        root_url, selected_at = routine_followup
+        context = self._seat_source_context(self._sources[root_url])
+        if (
+            context is None
+            or context[0] != self.preferred_term
+            or context != self._worker_context_affinity
+            or self._source_last_success.get(root_url, 0.0) < selected_at
+            or (
+                self._routine_batch_context == context
+                and self._routine_batch_count >= SEAT_ROUTINE_SUBJECT_BATCH_MAX
+            )
+        ):
+            return None
+        sibling = self._choose_context_followup_locked(context, now)
+        if sibling is None:
+            return None
+        self._consecutive_viewed_selections = 0
+        if self._routine_batch_context == context:
+            self._routine_batch_count += 1
+        else:
+            self._routine_batch_context = context
+            self._routine_batch_count = 1
+        self._routine_turn += 1
+        self._seat_throughput_events.append((now, "routine", 0))
+        self._seat_throughput_events.append((now, "routine_context_followup", 0))
+        if viewed_origin:
+            self._seat_throughput_events.append((now, "viewed_chain_followup", 0))
+        return sibling
+
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
@@ -810,6 +858,7 @@ class SeatRefreshService:
                     # Manual work always preempts and cancels any follow-up.
                     self._context_followup_after = None
                     self._routine_followup_after = None
+                    self._routine_followup_from_viewed = False
                     self._routine_batch_context = None
                     self._routine_batch_count = 0
                     self._seat_throughput_events.append((now, "priority", 0))
@@ -837,9 +886,22 @@ class SeatRefreshService:
                         self._routine_batch_context = context
                         self._routine_batch_count = 1
                         self._routine_turn += 1
+                        # The very next verified Spring routine slot may
+                        # reuse this sibling once, even with viewed work.
+                        # This is not an unbounded follow-up chain.
+                        self._routine_followup_after = (sibling, now)
+                        self._routine_followup_from_viewed = True
                         self._seat_throughput_events.append((now, "routine", 0))
                         self._seat_throughput_events.append((now, "context_followup", 0))
                         return sibling
+
+            # A verified viewed sibling gets at most one extra Spring
+            # context-reuse turn before we consider another viewed page.
+            # The helper clears its pending state even on failure.
+            if self._routine_followup_from_viewed:
+                chained = self._take_routine_context_followup_locked(now)
+                if chained is not None:
+                    return chained
 
             viewed = [
                 url for url in self._interests
@@ -850,41 +912,12 @@ class SeatRefreshService:
             if viewed and self._consecutive_viewed_selections < SEAT_MAX_VIEWED_BURST:
                 return self._choose_viewed_source_locked(viewed, now)
 
-            # After a successful routine Spring page, reuse its verified
-            # subject state for one stale sibling, but ONLY if the next
-            # routine turn is another Spring turn. Preserve the 4:1
-            # Spring/other rotation and do not delay eligible viewed work.
-            routine_followup = self._routine_followup_after
-            self._routine_followup_after = None
-            if (
-                routine_followup is not None
-                and self._preferred_sources
-                and (not self._other_sources or self._routine_turn % 5 != 4)
-            ):
-                root_url, selected_at = routine_followup
-                context = self._seat_source_context(self._sources[root_url])
-                if (
-                    context is not None
-                    and context[0] == self.preferred_term
-                    and context == self._worker_context_affinity
-                    and self._source_last_success.get(root_url, 0.0) >= selected_at
-                    and (
-                        self._routine_batch_context != context
-                        or self._routine_batch_count < SEAT_ROUTINE_SUBJECT_BATCH_MAX
-                    )
-                ):
-                    sibling = self._choose_context_followup_locked(context, now)
-                    if sibling is not None:
-                        self._consecutive_viewed_selections = 0
-                        if self._routine_batch_context == context:
-                            self._routine_batch_count += 1
-                        else:
-                            self._routine_batch_context = context
-                            self._routine_batch_count = 1
-                        self._routine_turn += 1
-                        self._seat_throughput_events.append((now, "routine", 0))
-                        self._seat_throughput_events.append((now, "routine_context_followup", 0))
-                        return sibling
+            # Standard routine continuation remains below viewed-class
+            # priority. The viewed-origin exception was handled above.
+            if self._routine_followup_after is not None:
+                sibling = self._take_routine_context_followup_locked(now)
+                if sibling is not None:
+                    return sibling
 
             if not self._sources:
                 return None
@@ -910,6 +943,7 @@ class SeatRefreshService:
                 # Only the NEXT selection can follow this page, and only
                 # after its current attempt has succeeded. Never chain.
                 self._routine_followup_after = (selected, now)
+                self._routine_followup_from_viewed = False
                 self._seat_throughput_events.append((now, "routine", 0))
                 return selected
             # If all routine sources are cooling down, do not idle when a
@@ -2040,6 +2074,9 @@ class SeatRefreshService:
             "routine_context_followups_last_60s": sum(
                 kind == "routine_context_followup" for _, kind, _ in recent
             ),
+            "viewed_chain_followups_last_60s": sum(
+                kind == "viewed_chain_followup" for _, kind, _ in recent
+            ),
             "successful_course_pages_last_300s": sum(
                 kind == "success" for _, kind, _ in self._seat_throughput_events
             ),
@@ -2063,6 +2100,9 @@ class SeatRefreshService:
             ),
             "routine_context_followups_last_300s": sum(
                 kind == "routine_context_followup" for _, kind, _ in self._seat_throughput_events
+            ),
+            "viewed_chain_followups_last_300s": sum(
+                kind == "viewed_chain_followup" for _, kind, _ in self._seat_throughput_events
             ),
         }
 
