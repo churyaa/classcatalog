@@ -137,3 +137,89 @@ def test_routine_without_viewed_interest_unchanged(tmp_path):
     assert service._next_source(0) == urls['HIST 110']
     assert service._next_source(1) == urls['HIST 111']
     assert service.public_status()['seat_refresh_throughput']['context_followup_selections_last_300s'] == 0
+
+
+# CLASSCATALOG_ROUTINE_SPRING_CONTEXT_FOLLOWUP_V1 offline regressions.
+def test_routine_spring_success_reuses_context_once(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    metrics = service.public_status()['seat_refresh_throughput']
+    assert metrics['routine_context_followups_last_300s'] == 1
+    assert metrics['routine_selections_last_300s'] == 2
+    # Simulate the worker recording completion of the chosen follow-up.
+    mark_verified_success(service, urls['HIST 111'])
+    # One extra page per routine root, not an unlimited same-subject run.
+    assert service._next_source(2) == urls['HIST 112']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 1
+
+
+def test_unverified_routine_refresh_does_not_trigger_sibling(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    service._worker_context_affinity = HIST
+    service._source_last_success[urls['HIST 110']] = time.time() - 3600
+    assert service._next_source(1) == urls['HIST 111']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 0
+
+
+def test_viewed_class_preempts_pending_routine_followup(tmp_path):
+    service, urls, nums = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    service.register_interest((nums['BIOL 350'],))
+    assert service._next_source(1) == urls['BIOL 350']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 0
+    # A viewed request cancels the pending routine continuation.
+    assert service._routine_followup_after is None
+
+
+def test_manual_refresh_cancels_pending_routine_followup(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    service._manual_queue.append(urls['MATH 150'])
+    assert service._next_source(1) == urls['MATH 150']
+    assert service._routine_followup_after is None
+
+
+def test_routine_followup_skips_siblings_in_cooldown(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    service._source_retry_after[urls['HIST 111']] = time.time() + 1800
+    assert service._next_source(1) == urls['HIST 112']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_60s'] == 1
+
+
+def test_routine_spring_fifth_slot_keeps_other_term_turn(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    service._routine_turn = 3  # The fourth Spring turn is now selected.
+    assert service._next_source(3) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    # The next turn is the nonpreferred term; context reuse must not consume it.
+    assert service._next_source(4) == urls['MATH 150']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 0
+
+
+def test_routine_followup_does_not_chain_after_its_own_success(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    assert service._next_source(1) == urls['HIST 111']
+    mark_verified_success(service, urls['HIST 111'])
+    # Cannot immediately select the next HIST sibling as another follow-up.
+    next_url = service._next_source(2)
+    assert next_url == urls['HIST 112']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 1
+
+
+def test_routine_sibling_respects_bounded_subject_batch(tmp_path):
+    service, urls, _ = make_service(tmp_path)
+    assert service._next_source(0) == urls['HIST 110']
+    mark_verified_success(service, urls['HIST 110'])
+    service._routine_batch_context = HIST
+    service._routine_batch_count = 8
+    assert service._next_source(1) == urls['HIST 111']
+    assert service.public_status()['seat_refresh_throughput']['routine_context_followups_last_300s'] == 0
