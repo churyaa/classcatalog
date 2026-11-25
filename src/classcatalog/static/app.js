@@ -23,6 +23,8 @@ const state = {
   seatPollSeconds: 30,
   seatStaleAfterSeconds: 1800,
   seatRefreshStatus: null,
+  seatTermFreshness: null,
+  seatTermFreshnessNextAt: 0,
   serviceMessages: {},
   scheduleDrawerOpen: false,
   scheduleDetailKey: null,
@@ -385,6 +387,7 @@ function writeFavorites(favorites) {
   } catch {
     // Favorites are a convenience feature; browsing should keep working if storage is unavailable.
   }
+  queueSavedSeatInterest();
 }
 
 function sectionFavoriteKey(section) {
@@ -443,6 +446,52 @@ function favoriteScheduleNumbers() {
     section.schedule_number,
     ...(section.linked_components || []).map((component) => component.schedule_number),
   ]).map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+// CLASSCATALOG_SEAT_FRESHNESS_ARCH_V1: only known class numbers leave
+// this browser; favorite/schedule contents remain localStorage-only.
+let savedSeatInterestTimer = null;
+let savedSeatInterestLastAt = 0;
+let savedSeatInterestLastKey = "";
+let savedSeatInterestPending = false;
+
+function savedSeatSectionKeys() {
+  const preferred = String(state.seatRefreshStatus?.preferred_term || state.selectedTerm || "");
+  const sections = [...favoriteSections(), ...Object.values(readSchedule()).filter(Boolean)];
+  sections.sort((left, right) =>
+    Number(String(right.term) === preferred) - Number(String(left.term) === preferred));
+  const keys = sections.flatMap((section) => [
+    section.schedule_number,
+    ...(section.linked_components || []).map((item) => item.schedule_number),
+  ].map((value) => `${String(section.term || "").trim()}::${String(value || "").trim()}`));
+  return [...new Set(keys.filter((value) => /^.+::\d{1,12}$/.test(value)))].slice(0, 250);
+}
+function queueSavedSeatInterest() {
+  window.clearTimeout(savedSeatInterestTimer);
+  savedSeatInterestTimer = window.setTimeout(() => { void sendSavedSeatInterest(); }, 800);
+}
+
+async function sendSavedSeatInterest() {
+  if (document.visibilityState === "hidden" || savedSeatInterestPending) return;
+  const sectionKeys = savedSeatSectionKeys();
+  if (!sectionKeys.length) return;
+  const fingerprint = sectionKeys.slice().sort().join(",");
+  const now = Date.now();
+  if (fingerprint === savedSeatInterestLastKey && now - savedSeatInterestLastAt < 60000) return;
+  savedSeatInterestLastKey = fingerprint;
+  savedSeatInterestLastAt = now;
+  savedSeatInterestPending = true;
+  try {
+    await fetchJson("/api/seats/interest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "saved", schedule_numbers: [], section_keys: sectionKeys }),
+    });
+  } catch (_error) {
+    // Seat-refresh interest is best-effort; favorites and schedules remain usable.
+  } finally {
+    savedSeatInterestPending = false;
+  }
 }
 
 function seatRecordKey(section) {
@@ -715,6 +764,7 @@ function writeSchedule(schedule) {
   } catch {
     // The schedule is a local convenience feature; browsing should still work if storage is unavailable.
   }
+  queueSavedSeatInterest();
 }
 
 function scheduleSectionKey(section) {
@@ -1421,21 +1471,37 @@ function renderSeatFreshness(status) {
   element.classList.remove("is-fresh", "is-stale");
   if (!status?.enabled) {
     element.textContent = "Live seat refresh unavailable";
+    element.title = "Seat counts may be historical. Verify important enrollment decisions with SDSU.";
     return;
   }
-  const age = Number(status.age_seconds);
-  if (!Number.isFinite(age)) {
-    element.textContent = "Live seat refresh starting…";
+  const rows = state.seatTermFreshness?.terms || [];
+  const preferred = rows.find((row) => row.term === status.preferred_term);
+  if (preferred && preferred.refreshable_sections > 0) {
+    const threshold = Math.round(state.seatStaleAfterSeconds / 60);
+    element.textContent = `${preferred.term}: ${preferred.fresh_percent}% verified in ${threshold} min · ${status.running ? "refresh active" : "refresh paused"}`;
+    element.title = `${preferred.fresh_cached_sections} of ${preferred.refreshable_sections} class sections verified recently. Other sections may show older seats. Check each class's timestamp.`;
+    element.classList.add(preferred.fresh_percent >= 90 ? "is-fresh" : "is-stale");
     return;
   }
-  if (age < 90) {
-    element.textContent = "Seats updated just now";
-    element.classList.add("is-fresh");
-    return;
+  element.textContent = status.running
+    ? "Seat updater active · verify each class's timestamp"
+    : "Seat updater paused · seat counts may be outdated";
+  element.title = "A recent worker update does not mean every class has current seat data.";
+  if (!status.running) element.classList.add("is-stale");
+}
+
+async function loadSeatTermFreshness() {
+  const now = Date.now();
+  // Separate, cached-by-interval API call; do not slow ordinary seat polling.
+  if (now < state.seatTermFreshnessNextAt) return;
+  state.seatTermFreshnessNextAt = now + 60000;
+  try {
+    const summary = await fetchJson("/api/seats/freshness", { cache: "no-store" });
+    state.seatTermFreshness = summary;
+    renderSeatFreshness(state.seatRefreshStatus);
+  } catch (_error) {
+    // Continue displaying the last known per-term summary if temporarily offline.
   }
-  const minutes = Math.max(1, Math.round(age / 60));
-  element.textContent = `Seats updated ${minutes} min ago`;
-  element.classList.add(age <= state.seatStaleAfterSeconds ? "is-fresh" : "is-stale");
 }
 
 async function loadSeatRefreshStatus() {
@@ -1447,6 +1513,8 @@ async function loadSeatRefreshStatus() {
     if (Number.isFinite(staleAfter) && staleAfter >= 60) state.seatStaleAfterSeconds = staleAfter;
     setServiceMessage("seat-status");
     renderSeatFreshness(status);
+    void loadSeatTermFreshness();
+    queueSavedSeatInterest();
   } catch (error) {
     const message = safeErrorMessage(error, "Seat data is temporarily unavailable.");
     const element = document.querySelector("#seat-freshness");
@@ -2400,9 +2468,12 @@ function seatFreshnessDetails(updatedAt) {
     ageText = "just now";
   } else if (ageSeconds < 3600) {
     ageText = `${Math.max(1, Math.round(ageSeconds / 60))} min ago`;
-  } else {
+  } else if (ageSeconds < 86400) {
     const hours = ageSeconds / 3600;
     ageText = `${hours < 10 ? hours.toFixed(1) : Math.round(hours)} hr ago`;
+  } else {
+    const days = Math.floor(ageSeconds / 86400);
+    ageText = `${days} day${days === 1 ? "" : "s"} ago`;
   }
   return {
     text: stale ? `Stale · updated ${ageText}` : `Updated ${ageText}`,
@@ -4573,6 +4644,9 @@ async function boot() {
   await loadCourses({ page: 1 });
   await loadSeatRefreshStatus();
   startSeatPolling();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) queueSavedSeatInterest();
+  });
 }
 
 window.addEventListener("error", () => {

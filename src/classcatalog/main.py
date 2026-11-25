@@ -8,7 +8,7 @@ import secrets
 import time as time_module
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from pathlib import Path
 from threading import RLock, Thread
 
@@ -94,6 +94,9 @@ class AdminAnnouncementRequest(BaseModel):
 
 class SeatInterestRequest(BaseModel):
     schedule_numbers: list[str]
+    # Older clients still default to actively viewed requests.
+    kind: Literal["viewed", "saved"] = "viewed"
+    section_keys: list[str] = Field(default_factory=list)
 
 
 class AdminSeatRefreshRequest(BaseModel):
@@ -893,6 +896,14 @@ def create_app(
             LOGGER.warning("slow_seat_status_endpoint duration_seconds=%.3f", elapsed)
         return status
 
+    @app.get("/api/seats/freshness")
+    async def seat_term_freshness(response: Response) -> dict[str, object]:
+        """Per-term verified coverage, polled less often than seat status."""
+        response.headers["Cache-Control"] = "no-store"
+        if active_seat_service is None:
+            return {"preferred_term": "", "stale_after_seconds": 1800, "terms": []}
+        return await run_in_threadpool(active_seat_service.public_term_freshness)
+
     @app.get("/api/ratings/status")
     async def ratings_status(response: Response) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
@@ -940,11 +951,17 @@ def create_app(
         ))
         if len(requested) > 250:
             raise HTTPException(status_code=400, detail="At most 250 class numbers can be prioritized at once.")
-        priority_sources = (
-            active_seat_service.register_interest(requested)
-            if active_seat_service is not None
-            else 0
-        )
+        section_keys = tuple(dict.fromkeys(
+            str(value).strip() for value in payload.section_keys if str(value).strip()
+        ))
+        if len(requested) + len(section_keys) > 250:
+            raise HTTPException(status_code=400, detail="At most 250 class numbers can be prioritized at once.")
+        if active_seat_service is None:
+            priority_sources = 0
+        elif payload.kind == "saved":
+            priority_sources = active_seat_service.register_saved_interest(requested, section_keys=section_keys)
+        else:
+            priority_sources = active_seat_service.register_interest(requested)
         return {"priority_sources": priority_sources}
 
     @app.get("/api/announcements")

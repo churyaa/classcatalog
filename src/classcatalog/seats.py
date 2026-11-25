@@ -342,10 +342,13 @@ class SeatRefreshService:
         self._other_term_turn = 0
         self._other_term_cursors = {name: 0 for name in self._other_term_order}
         self._source_by_schedule: dict[str, set[str]] = {}
+        self._source_by_term_schedule: dict[tuple[str, str], set[str]] = {}
         self._source_by_course_code: dict[str, set[str]] = {}
         for url, source in self._sources.items():
             for schedule_number in source.schedule_to_term:
                 self._source_by_schedule.setdefault(schedule_number, set()).add(url)
+                name = code_to_name.get(source.schedule_to_term[schedule_number], "")
+                self._source_by_term_schedule.setdefault((name, schedule_number), set()).add(url)
             for course_code in source.course_codes:
                 normalized_code = " ".join(course_code.strip().upper().split())
                 self._source_by_course_code.setdefault(normalized_code, set()).add(url)
@@ -381,6 +384,9 @@ class SeatRefreshService:
         self._missing_numbers_by_source: dict[str, set[str]] = {}
         self._unlisted_numbers_by_source: dict[str, set[str]] = {}
         self._interests: dict[str, float] = {}
+        # CLASSCATALOG_SEAT_FRESHNESS_ARCH_V1: persistent browser-saved demand is
+        # lower priority than visible classes and bounded by routine turns.
+        self._saved_interests: dict[str, float] = {}
         self._manual_queue: deque[str] = deque()
         self._cycle_seen: set[str] = set()
         self._last_full_cycle_at: float | None = None
@@ -540,6 +546,40 @@ class SeatRefreshService:
                 for source_url in self._source_by_schedule.get(schedule, ()):
                     self._interests[source_url] = expires
                     added_sources.add(source_url)
+        if added_sources:
+            self._wake.set()
+        return len(added_sources)
+
+    def register_saved_interest(
+        self, schedule_numbers: Sequence[str], *, section_keys: Sequence[str] = (),
+    ) -> int:
+        """Prioritize browser-saved favorites/schedule without starving routine work.
+
+        This contains no account identifiers and stores no browser state on disk.
+        Deduplicate physical class -> source mappings; only source URLs are kept.
+        The browser renews this short-lived demand while its tab is active.
+        """
+        now = time.time()
+        expires = now + self.interest_ttl_seconds
+        added_sources: set[str] = set()
+        with self._lock:
+            for raw in schedule_numbers:
+                schedule = str(raw).strip()
+                if not schedule:
+                    continue
+                for url in self._source_by_schedule.get(schedule, ()):
+                    self._saved_interests[url] = expires
+                    added_sources.add(url)
+            # Term-qualified keys prevent recycled class numbers in older
+            # semesters from becoming priority targets for a saved Spring class.
+            for raw in section_keys:
+                value = str(raw).strip()
+                term, separator, number = value.rpartition("::")
+                if not separator or not term or not number:
+                    continue
+                for url in self._source_by_term_schedule.get((term, number), ()):
+                    self._saved_interests[url] = expires
+                    added_sources.add(url)
         if added_sources:
             self._wake.set()
         return len(added_sources)
@@ -911,6 +951,55 @@ class SeatRefreshService:
             ]
             if viewed and self._consecutive_viewed_selections < SEAT_MAX_VIEWED_BURST:
                 return self._choose_viewed_source_locked(viewed, now)
+
+            # Saved favorites and schedule classes are demand-driven, but may
+            # consume only the remaining priority-burst budget. A routine slot
+            # is guaranteed after four combined viewed/saved selections.
+            # A freshly verified saved source does not need another request.
+            for url, expires in tuple(self._saved_interests.items()):
+                if expires <= now:
+                    self._saved_interests.pop(url, None)
+            if self._consecutive_viewed_selections < SEAT_MAX_VIEWED_BURST:
+                saved = [
+                    url for url in self._saved_interests
+                    if url not in self._interests
+                    and self._source_retry_after.get(url, 0.0) <= now
+                    and now - self._source_last_attempt.get(url, 0.0)
+                        >= self.priority_interval_seconds
+                    and now - self._source_last_success.get(url, 0.0)
+                        >= self.stale_after_seconds
+                ]
+                if saved:
+                    def saved_age(url: str) -> tuple[float, float, str]:
+                        return (self._source_last_attempt.get(url, 0.0),
+                                self._source_last_success.get(url, 0.0), url)
+                    oldest = min(saved, key=saved_age)
+                    chosen = oldest
+                    # Batch saved classes into the already *verified* subject
+                    # context, with the same age/overtake limits as routine work.
+                    if self._worker_context_affinity is not None:
+                        matching = [url for url in saved if
+                            self._seat_source_context(self._sources[url])
+                            == self._worker_context_affinity]
+                        if matching:
+                            candidate = min(matching, key=saved_age)
+                            baseline = self._source_last_attempt.get(oldest, 0.0)
+                            candidate_age = self._source_last_attempt.get(candidate, 0.0)
+                            older = sum(saved_age(url) < saved_age(candidate) for url in saved)
+                            if (candidate_age >= baseline
+                                and candidate_age - baseline <= SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS
+                                and older <= SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES):
+                                chosen = candidate
+                                if chosen != oldest:
+                                    self._seat_throughput_events.append((now, "batch", 0))
+                    self._consecutive_viewed_selections += 1
+                    self._context_followup_after = None
+                    self._routine_followup_after = None
+                    self._routine_followup_from_viewed = False
+                    self._routine_batch_context = None
+                    self._routine_batch_count = 0
+                    self._seat_throughput_events.append((now, "saved", 0))
+                    return chosen
 
             # Standard routine continuation remains below viewed-class
             # priority. The viewed-origin exception was handled above.
@@ -1911,9 +2000,32 @@ class SeatRefreshService:
                 "priority_interval_seconds": self.priority_interval_seconds,
                 "preferred_term": self.preferred_term,
                 "preferred_source_pages": len(self._preferred_sources),
+                "saved_priority_sources": len(self._saved_interests),
                 "other_source_pages": len(self._other_sources),
                 "seat_refresh_throughput": self._seat_refresh_throughput_locked(),
             }
+
+    def public_term_freshness(self) -> dict[str, object]:
+        """Public, read-only per-term *verified* coverage (no class identifiers).
+
+        The costlier per-term recount is intentionally outside public_status():
+        health/search/seat-status polling stays inexpensive. Existing cached
+        snapshots and per-source validation remain authoritative.
+        """
+        rows = self._semester_freshness()
+        return {
+            "preferred_term": self.preferred_term,
+            "stale_after_seconds": self.stale_after_seconds,
+            "terms": [{
+                key: row[key]
+                for key in (
+                    "term", "refreshable_sections", "source_pages",
+                    "cached_sections", "fresh_cached_sections",
+                    "stale_cached_sections", "pending_cached_sections",
+                    "uncached_sections", "fresh_percent",
+                )
+            } for row in rows],
+        }
 
     def missing_section_keys(self) -> set[str]:
         """Physical keys absent from the last trustworthy complete course grid."""
@@ -2067,6 +2179,7 @@ class SeatRefreshService:
             "subject_context_rehydrates_last_60s": sum(kind == "context" for _, kind, _ in recent),
             "affinity_reorders_last_60s": sum(kind == "batch" for _, kind, _ in recent),
             "priority_preemptions_last_60s": sum(kind == "priority" for _, kind, _ in recent),
+            "saved_priority_selections_last_60s": sum(kind == "saved" for _, kind, _ in recent),
             "routine_selections_last_60s": sum(kind == "routine" for _, kind, _ in recent),
             "context_followup_selections_last_60s": sum(
                 kind == "context_followup" for _, kind, _ in recent
@@ -2091,6 +2204,9 @@ class SeatRefreshService:
             ),
             "priority_preemptions_last_300s": sum(
                 kind == "priority" for _, kind, _ in self._seat_throughput_events
+            ),
+            "saved_priority_selections_last_300s": sum(
+                kind == "saved" for _, kind, _ in self._seat_throughput_events
             ),
             "routine_selections_last_300s": sum(
                 kind == "routine" for _, kind, _ in self._seat_throughput_events
@@ -2154,6 +2270,7 @@ class SeatRefreshService:
                     "failed_course_refreshes": self._failed_sources,
                     "requests_completed": self._requests_completed,
                     "priority_sources": len(self._interests),
+                    "saved_priority_sources": len(self._saved_interests),
                     "manual_refresh_pending": len(self._manual_queue),
                     "refreshable_course_codes": sorted(self._source_by_course_code),
                     "seat_failures": failures,
