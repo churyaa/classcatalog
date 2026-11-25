@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from threading import Event, RLock, Thread
 import time
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from bs4 import BeautifulSoup
@@ -55,6 +55,10 @@ DEFAULT_STATUS_COUNTS_CACHE_SECONDS = 10.0  # BACKEND_PERFORMANCE_PATCH_1
 MAX_RETAINED_SEAT_FAILURES = 100
 # SEAT_REFRESH_PATCH_3: bounded source retries and admin-only diagnostics.
 SLOW_SEAT_REFRESH_SECONDS = 20.0
+# CLASSCATALOG_SEAT_OPTIONAL_RECOVERY_GUARD_V1: only defer EXTRA
+# fallback calls; never interrupt an in-flight PeopleSoft request.
+SEAT_OPTIONAL_RECOVERY_BUDGET_SECONDS = 50.0
+SEAT_OPTIONAL_RECOVERY_COOLDOWN_SECONDS = 300.0
 SEAT_FAILURE_COOLDOWN_SECONDS = 60.0
 SEAT_FAILURE_COOLDOWN_MAX_SECONDS = 1800.0
 # Confirmed source-inventory drift is retried periodically, but not every minute.
@@ -64,6 +68,17 @@ SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS = 21600.0
 SEAT_EMPTY_GRID_RECOVERY_GLOBAL_INTERVAL_SECONDS = 120.0
 # Bound expensive per-section PeopleSoft modal requests on linked options.
 MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE = 4
+
+class SeatRefreshRecoveryDeferredError(RuntimeError):
+    """A slow failed seat fetch is deferred instead of starting more fallback calls."""
+
+    def __init__(self, *, stage: str, elapsed_seconds: float) -> None:
+        self.stage = stage
+        self.elapsed_seconds = elapsed_seconds
+        super().__init__(
+            f"Skipped optional {stage} after {elapsed_seconds:.1f}s spent on this source"
+        )
+
 
 class SeatInventoryMismatchError(ResultParseError):
     """Correct-course-and-term evidence disagrees with stored class inventory.
@@ -1134,9 +1149,12 @@ class SeatRefreshService:
                                 self._seat_stage_durations.append((
                                     time.time(), "page", time.monotonic() - page_started,
                                 ))
-                        if self._failed_sources != failures_before:
-                            # _refresh_source may have reset the session or
-                            # attempted another recovery. Revalidate context.
+                        if (
+                            self._failed_sources != failures_before
+                            or self._worker_context_affinity is None
+                        ):
+                            # Session-reset fallbacks invalidate worker affinity
+                            # even when a recovered course page succeeds.
                             active_context = None
                             self._worker_context_affinity = None
                         self._flush_cache()
@@ -1173,7 +1191,9 @@ class SeatRefreshService:
             streak = (self._source_failure_streak.get(source_url, 0) + 1
                       if previous_type == type(exc).__name__ else 1)
             self._source_failure_streak[source_url] = streak
-            if isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError)):
+            if isinstance(exc, SeatRefreshRecoveryDeferredError):
+                delay = SEAT_OPTIONAL_RECOVERY_COOLDOWN_SECONDS
+            elif isinstance(exc, (SeatInventoryMismatchError, SeatUnverifiedEmptyGridError)):
                 # Empty-but-unverified pages also use a long cooldown, preventing
                 # repeated expensive recoveries while SDSU's state is inconsistent.
                 delay = min(SEAT_INVENTORY_MISMATCH_COOLDOWN_MAX_SECONDS,
@@ -1324,6 +1344,34 @@ class SeatRefreshService:
             )
         return parsed
 
+    def _seat_timed_call(self, stage: str, call: Callable[[], object]):
+        """Record phase cost even on failure, without changing client retry rules."""
+        started = time.monotonic()
+        try:
+            return call()
+        finally:
+            with self._lock:
+                self._seat_stage_durations.append((
+                    time.time(), stage, max(0.0, time.monotonic() - started),
+                ))
+
+    def _check_optional_seat_recovery_budget(
+        self, started_monotonic: float | None, stage: str,
+    ) -> None:
+        """Stop BEFORE a new fallback network call, never mid-response.
+
+        An ordinary successful direct page is still accepted even if it took
+        longer than this budget; the safeguard only avoids costly escalation.
+        """
+        if started_monotonic is None:
+            return
+        elapsed = time.monotonic() - started_monotonic
+        if elapsed < SEAT_OPTIONAL_RECOVERY_BUDGET_SECONDS:
+            return
+        with self._lock:
+            self._seat_throughput_events.append((time.time(), "recovery_deferred", 0))
+        raise SeatRefreshRecoveryDeferredError(stage=stage, elapsed_seconds=elapsed)
+
     def _refresh_linked_component_seats(
         self,
         client: SdsuPeopleSoftSession,
@@ -1334,6 +1382,7 @@ class SeatRefreshService:
         cache_rows: dict[tuple[str, str], dict[str, object]],
         updates: dict[tuple[str, str], dict[str, object]],
         refreshed_at: str,
+        deadline_monotonic: float | None = None,
     ) -> None:
         """Read each missing linked class from its own Class Availability modal.
 
@@ -1373,6 +1422,12 @@ class SeatRefreshService:
                 ),
             )
         for number in candidates[:MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE]:
+            # Preserve already-verified primary seats rather than starting another
+            # potentially slow class-modal fetch after the optional work budget.
+            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                with self._lock:
+                    self._seat_throughput_events.append((time.time(), "linked_modal_deferred", 0))
+                break
             term_key = source.schedule_to_term[number]
             try:
                 tab = client.fetch_class_detail_tab_page(
@@ -1434,6 +1489,7 @@ class SeatRefreshService:
 
     def _recover_explicit_empty_grid(
         self, client: SdsuPeopleSoftSession, source_url: str, source: SeatSource,
+        *, refresh_started_monotonic: float | None = None,
     ):
         """Try fresh exact-subject discovery once, without trusting an empty URL.
 
@@ -1470,10 +1526,18 @@ class SeatRefreshService:
             self._last_empty_recovery_attempt_monotonic = now
 
         try:
-            pages = client.rehydrate_subject_context(
-                term=source.recovery_term,
-                term_code=source.recovery_term_code,
-                subject=source.recovery_subject,
+            self._check_optional_seat_recovery_budget(
+                refresh_started_monotonic, "empty_grid_subject_recovery",
+            )
+            # Rehydration resets cookies/server component state, so the worker's
+            # previous context must not remain a valid affinity hint.
+            self._worker_context_affinity = None
+            pages = self._seat_timed_call(
+                "empty_subject", lambda: client.rehydrate_subject_context(
+                    term=source.recovery_term,
+                    term_code=source.recovery_term_code,
+                    subject=source.recovery_subject,
+                ),
             )
             result = client.parse_subject_pages(pages)
             if (
@@ -1513,7 +1577,12 @@ class SeatRefreshService:
                 and "SSR_CS_WRAP_FL.GBL" in fresh_parts.path.upper()
             ):
                 raise unverified("unsafe_fresh_detail_url")
-            detail = client.fetch_detail_pages(fresh_detail_url)
+            self._check_optional_seat_recovery_budget(
+                refresh_started_monotonic, "empty_grid_detail_recovery",
+            )
+            detail = self._seat_timed_call(
+                "empty_detail", lambda: client.fetch_detail_pages(fresh_detail_url),
+            )
             loaded = type(
                 "RecoveredCourseInfoPage", (),
                 {
@@ -1553,6 +1622,8 @@ class SeatRefreshService:
                 sum(str(option.class_number).strip() in expected for option in parsed.options),
             )
             return loaded, parsed
+        except SeatRefreshRecoveryDeferredError as exc:
+            raise unverified("recovery_budget_exceeded") from exc
         except (SeatUnverifiedEmptyGridError, SeatInventoryMismatchError):
             raise
         except Exception as exc:
@@ -1575,24 +1646,46 @@ class SeatRefreshService:
             effective_url = self._resolved_url_by_source.get(source_url, source_url)
             direct_error: BaseException | None = None
             try:
-                loaded = client.fetch_course_info_page(effective_url)
+                loaded = self._seat_timed_call(
+                    "direct", lambda: client.fetch_course_info_page(effective_url),
+                )
                 parsed = self._parse_expected_source_page(loaded, source)
             except SeatInventoryMismatchError as exc:
                 if exc.reason != "no_scheduled_classes":
                     # Visible *different* class numbers remain genuine review evidence.
                     raise
-                loaded, parsed = self._recover_explicit_empty_grid(client, source_url, source)
+                loaded, parsed = self._recover_explicit_empty_grid(
+                    client, source_url, source,
+                    refresh_started_monotonic=started_monotonic,
+                )
             except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError) as exc:
                 direct_error = exc
-                client.reset_public_session()
-                client.bootstrap()
+                # When the direct call already consumed the budget, defer the
+                # entire fallback and let the worker refresh another course.
+                self._check_optional_seat_recovery_budget(
+                    started_monotonic, "session_retry",
+                )
+                self._worker_context_affinity = None
+                self._seat_timed_call("session_reset", client.reset_public_session)
+                self._check_optional_seat_recovery_budget(
+                    started_monotonic, "session_bootstrap",
+                )
+                self._seat_timed_call("bootstrap", client.bootstrap)
+                self._check_optional_seat_recovery_budget(
+                    started_monotonic, "course_retry",
+                )
                 try:
-                    loaded = client.fetch_course_info_page(effective_url)
+                    loaded = self._seat_timed_call(
+                        "retry", lambda: client.fetch_course_info_page(effective_url),
+                    )
                     parsed = self._parse_expected_source_page(loaded, source)
                 except SeatInventoryMismatchError as exc:
                     if exc.reason != "no_scheduled_classes":
                         raise
-                    loaded, parsed = self._recover_explicit_empty_grid(client, source_url, source)
+                    loaded, parsed = self._recover_explicit_empty_grid(
+                        client, source_url, source,
+                        refresh_started_monotonic=started_monotonic,
+                    )
                 except (PeopleSoftSessionError, ResultParseError, CourseOptionPaginationError):
                     if source.recovery_detail_url is None:
                         raise direct_error
@@ -1601,17 +1694,28 @@ class SeatRefreshService:
                         and source.recovery_term
                         and source.recovery_term_code
                     ):
+                        self._check_optional_seat_recovery_budget(
+                            started_monotonic, "subject_recovery",
+                        )
                         # A canonical detail URL is not enough in a brand-new Fluid
                         # session.  Rebuild the same exact-subject search state that the
                         # production deep scraper uses when resuming persisted detail
                         # URLs, then follow the wrapper/grouplet chain only as far as
                         # Course Information.
-                        client.rehydrate_subject_context(
-                            term=source.recovery_term,
-                            term_code=source.recovery_term_code,
-                            subject=source.recovery_subject,
+                        self._worker_context_affinity = None
+                        self._seat_timed_call(
+                            "subject_recovery", lambda: client.rehydrate_subject_context(
+                                term=source.recovery_term,
+                                term_code=source.recovery_term_code,
+                                subject=source.recovery_subject,
+                            ),
                         )
-                    recovered = client.fetch_detail_pages(source.recovery_detail_url)
+                    self._check_optional_seat_recovery_budget(
+                        started_monotonic, "detail_recovery",
+                    )
+                    recovered = self._seat_timed_call(
+                        "detail_recovery", lambda: client.fetch_detail_pages(source.recovery_detail_url),
+                    )
                     loaded = type(
                         "RecoveredCourseInfoPage",
                         (),
@@ -1707,12 +1811,17 @@ class SeatRefreshService:
                 }
 
             # Recover physical secondary components omitted by the option-row parser.
-            self._refresh_linked_component_seats(
-                client, loaded, source,
-                parsed_term_code=getattr(parsed, "term_code", None),
-                cache_rows=cache_rows,
-                updates=updates,
-                refreshed_at=refreshed_at,
+            self._seat_timed_call(
+                "linked_modals", lambda: self._refresh_linked_component_seats(
+                    client, loaded, source,
+                    parsed_term_code=getattr(parsed, "term_code", None),
+                    cache_rows=cache_rows,
+                    updates=updates,
+                    refreshed_at=refreshed_at,
+                    deadline_monotonic=(
+                        started_monotonic + SEAT_OPTIONAL_RECOVERY_BUDGET_SECONDS
+                    ),
+                ),
             )
             changed_instructors = self.repository.apply_instructor_updates(instructor_updates)
             if changed_instructors:
@@ -2152,7 +2261,31 @@ class SeatRefreshService:
         page_seconds = [
             seconds for _, stage, seconds in self._seat_stage_durations if stage == "page"
         ]
+        # Bounded in-memory stage samples; no URLs or student identifiers.
+        phase_names = (
+            "direct", "session_reset", "bootstrap", "retry",
+            "subject_recovery", "detail_recovery", "empty_subject",
+            "empty_detail", "linked_modals",
+        )
+        phase_summary = {}
+        for phase in phase_names:
+            durations = [
+                seconds for _, stage, seconds in self._seat_stage_durations
+                if stage == phase
+            ]
+            phase_summary[phase] = {
+                "attempts": len(durations),
+                "seconds": round(sum(durations), 3),
+                "max_seconds": round(max(durations), 3) if durations else None,
+            }
         return {
+            "seat_refresh_phases_last_300s": phase_summary,
+            "recovery_deferred_last_300s": sum(
+                kind == "recovery_deferred" for _, kind, _ in self._seat_throughput_events
+            ),
+            "linked_modal_deferred_last_300s": sum(
+                kind == "linked_modal_deferred" for _, kind, _ in self._seat_throughput_events
+            ),
             "worker_stage_timing_last_300s": {
                 "window_seconds": 300,
                 "context_attempts": len(context_seconds),
