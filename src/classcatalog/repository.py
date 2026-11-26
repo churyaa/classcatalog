@@ -332,6 +332,9 @@ class CourseRepository:
             "seat_capacity",
             "seats_enrolled",
             "seat_updated_at",
+            "waitlist_available",
+            "waitlist_capacity",
+            "waitlist_total",
         )
         changed_physical: set[tuple[str, str]] = set()
         with self._lock:

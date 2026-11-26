@@ -98,6 +98,9 @@ class CourseClassOption(BaseModel):
     open_seats: int | None = Field(default=None, ge=0)
     seat_capacity: int | None = Field(default=None, ge=0)
     seats_enrolled: int | None = Field(default=None, ge=0)
+    waitlist_available: int | None = Field(default=None, ge=0)
+    waitlist_capacity: int | None = Field(default=None, ge=0)
+    waitlist_total: int | None = Field(default=None, ge=0)
     source_row_index: int = Field(ge=0)
 
 

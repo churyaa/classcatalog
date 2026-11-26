@@ -506,6 +506,9 @@ function applySeatRecord(target, record) {
     seats_available: record.seats_available ?? target.seats_available,
     seat_capacity: record.seat_capacity ?? target.seat_capacity,
     seats_enrolled: record.seats_enrolled ?? target.seats_enrolled,
+    waitlist_available: record.waitlist_available ?? target.waitlist_available,
+    waitlist_capacity: record.waitlist_capacity ?? target.waitlist_capacity,
+    waitlist_total: record.waitlist_total ?? target.waitlist_total,
     instructor: record.instructor ?? target.instructor,
     seat_updated_at: record.updated_at ?? target.seat_updated_at,
   };
@@ -2431,10 +2434,20 @@ function seatSummary(section) {
   const statusLabel = status === "unknown"
     ? "Not posted"
     : labels[status] || status || "Not posted";
-  // SEAT_AVAILABILITY_DISPLAY_V1: numerator is available/open seats.
-  const primary = capacity != null && available != null
-    ? `${statusLabel} ${available}/${capacity}`
-    : statusLabel;
+  // CLASSCATALOG_WAITLIST_LIVE_V1: waitlist numerator = available places,
+  // denominator = total waitlist capacity (not the classroom capacity).
+  const validWaitlist = Number.isInteger(section.waitlist_available)
+    && Number.isInteger(section.waitlist_capacity)
+    && section.waitlist_capacity > 0
+    && section.waitlist_available >= 0
+    && section.waitlist_available <= section.waitlist_capacity;
+  const primary = status === "waitlist"
+    ? (validWaitlist
+        ? `${statusLabel} ${section.waitlist_available}/${section.waitlist_capacity}`
+        : statusLabel)
+    : (capacity != null && available != null
+        ? `${statusLabel} ${available}/${capacity}`
+        : statusLabel);
 
   let secondary = "";
   if (status === "open" && available != null) {

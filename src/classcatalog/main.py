@@ -937,6 +937,9 @@ def create_app(
                     "seats_available": section.seats_available,
                     "seat_capacity": section.seat_capacity,
                     "seats_enrolled": section.seats_enrolled,
+                    "waitlist_available": section.waitlist_available,
+                    "waitlist_capacity": section.waitlist_capacity,
+                    "waitlist_total": section.waitlist_total,
                     "instructor": section.instructor,
                     "updated_at": None,
                 }

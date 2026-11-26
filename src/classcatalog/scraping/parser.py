@@ -528,6 +528,12 @@ _SEAT_COUNT_RE = re.compile(
     r"(?:Open\s+)?Seats?\s+(?P<open>\d+)\s+of\s+(?P<capacity>\d+)",
     re.I,
 )
+# CLASSCATALOG_WAITLIST_LIVE_V1: The numerator is available WAITLIST places,
+# never class seats occupied or enrolled.
+_WAITLIST_AVAILABLE_RE = re.compile(
+    r"Wait\s*list\s+Available\s+Places?\s+(?P<available>[\d,]+)\s+of\s+(?P<capacity>[\d,]+)",
+    re.I,
+)
 
 
 def _tag_text_by_id(soup: BeautifulSoup, element_id: str) -> str | None:
@@ -615,6 +621,20 @@ def _parse_seat_counts(
     capacity = int(match.group("capacity"))
     enrolled = max(capacity - open_seats, 0)
     return open_seats, capacity, enrolled
+
+
+def _parse_waitlist_available_places(
+    value: str | None,
+) -> tuple[int | None, int | None, int | None]:
+    """Return available, capacity, and filled waitlist places, if verified."""
+    match = _WAITLIST_AVAILABLE_RE.search(value or "")
+    if match is None:
+        return None, None, None
+    available = int(match.group("available").replace(",", ""))
+    capacity = int(match.group("capacity").replace(",", ""))
+    if available > capacity:
+        return None, None, None
+    return available, capacity, capacity - available
 
 
 def _parse_class_cell(value: str | None) -> tuple[str | None, str | None]:
@@ -822,6 +842,9 @@ def parse_course_info_page(
             r"SSR_CLSRCH_F_WK_SSR_DESCR50_1",
         )
         open_seats, seat_capacity, seats_enrolled = _parse_seat_counts(seats_text)
+        waitlist_available, waitlist_capacity, waitlist_total = (
+            _parse_waitlist_available_places(seats_text)
+        )
 
         section_number = (
             selected_section_number
@@ -849,6 +872,9 @@ def parse_course_info_page(
                 open_seats=open_seats,
                 seat_capacity=seat_capacity,
                 seats_enrolled=seats_enrolled,
+                waitlist_available=waitlist_available,
+                waitlist_capacity=waitlist_capacity,
+                waitlist_total=waitlist_total,
                 source_row_index=row_index,
             )
         )

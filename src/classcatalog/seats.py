@@ -1482,6 +1482,7 @@ class SeatRefreshService:
         updates: dict[tuple[str, str], dict[str, object]],
         refreshed_at: str,
         deadline_monotonic: float | None = None,
+        waitlist_modal_numbers: set[str] | None = None,
     ) -> None:
         """Read each missing linked class from its own Class Availability modal.
 
@@ -1503,15 +1504,27 @@ class SeatRefreshService:
             & visible_numbers
             - {schedule for _term, schedule in cache_rows}
         )
-        if not missing:
+        # Also verify primary Waitlist rows when the grid does not expose
+        # authoritative Waitlist Available Places. Do not stamp cached values fresh.
+        waitlist_modals = (
+                (waitlist_modal_numbers or set())
+                & visible_numbers
+                & set(source.schedule_to_term)
+        )
+        targets = missing | waitlist_modals
+        if not targets:
             return
 
-        # Prevent many class-modal POSTs from blocking the whole seat-refresh queue.
-        # When the source is refreshed again, prioritize older/missing records.
+        # Prioritize missing physical components ahead of extra waitlist lookups.
+        # Give an actively viewed course at most two *extra* modal attempts after
+        # the routine fallback budget. All modal responses still require matching
+        # class numbers and complete availability data.
         with self._lock:
+            viewed_grace = 2 if self._interests.get(source.url, 0.0) > time.time() else 0
             candidates = sorted(
-                missing,
+                targets,
                 key=lambda number: (
+                    number not in missing,
                     _parse_iso_timestamp(
                         self._records.get(
                             (source.schedule_to_term[number], number), {}
@@ -1524,9 +1537,12 @@ class SeatRefreshService:
             # Preserve already-verified primary seats rather than starting another
             # potentially slow class-modal fetch after the optional work budget.
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-                with self._lock:
-                    self._seat_throughput_events.append((time.time(), "linked_modal_deferred", 0))
-                break
+                if viewed_grace > 0:
+                    viewed_grace -= 1
+                else:
+                    with self._lock:
+                        self._seat_throughput_events.append((time.time(), "linked_modal_deferred", 0))
+                    break
             term_key = source.schedule_to_term[number]
             try:
                 tab = client.fetch_class_detail_tab_page(
@@ -1540,6 +1556,14 @@ class SeatRefreshService:
                 if live.seats_available is None or live.seat_capacity is None:
                     raise ValueError(
                         "Class Availability modal omitted individual seat counts"
+                    )
+                if (
+                    live.status is SeatStatus.WAITLIST
+                    and (getattr(live, "waitlist_available", None) is None
+                         or getattr(live, "waitlist_capacity", None) is None)
+                ):
+                    raise ValueError(
+                        "Class Availability modal omitted verified waitlist counts"
                     )
             except Exception as exc:  # noqa: BLE001 - one lab cannot block other seats
                 LOGGER.warning(
@@ -1568,7 +1592,13 @@ class SeatRefreshService:
             if enrolled is None:
                 enrolled = max(live.seat_capacity - live.seats_available, 0)
             key = (term_key, number)
+            waitlist_fields = {
+                name: getattr(live, name)
+                for name in ("waitlist_available", "waitlist_capacity", "waitlist_total")
+                if getattr(live, name, None) is not None
+            }
             updates[key] = {
+                **waitlist_fields,
                 "seat_status": status,
                 "seats_available": live.seats_available,
                 "seat_capacity": live.seat_capacity,
@@ -1576,6 +1606,7 @@ class SeatRefreshService:
                 "seat_updated_at": refreshed_at,
             }
             cache_rows[key] = {
+                **waitlist_fields,
                 "term": term_key,
                 "schedule_number": number,
                 "seat_status": status.value,
@@ -1890,7 +1921,43 @@ class SeatRefreshService:
                     if option.open_seats is not None and option.open_seats > 0
                     else option.status
                 )
+                waitlist_fields = {
+                    name: getattr(option, name)
+                    for name in ("waitlist_available", "waitlist_capacity", "waitlist_total")
+                    if getattr(option, name, None) is not None
+                }
+                if refreshed_status is SeatStatus.WAITLIST and not (
+                    "waitlist_available" in waitlist_fields
+                    and "waitlist_capacity" in waitlist_fields
+                ):
+                    # Grid status can identify Waitlist but cannot verify its
+                    # numerical capacity. Update the status without falsely
+                    # refreshing its timestamp; the exact-class modal follows.
+                    old = self._records.get(key, {})
+                    updates[key] = {
+                        "seat_status": refreshed_status,
+                        "seats_available": option.open_seats,
+                        "seat_capacity": option.seat_capacity,
+                        "seats_enrolled": option.seats_enrolled,
+                    }
+                    cache_rows[key] = {
+                        "term": term_key,
+                        "schedule_number": class_number,
+                        "seat_status": refreshed_status.value,
+                        "seats_available": option.open_seats,
+                        "seat_capacity": option.seat_capacity,
+                        "seats_enrolled": option.seats_enrolled,
+                        "updated_at": old.get("updated_at"),
+                        "source_url": source_url,
+                        **{
+                            name: old[name]
+                            for name in ("waitlist_available", "waitlist_capacity", "waitlist_total")
+                            if old.get(name) is not None
+                        },
+                    }
+                    continue
                 update = {
+                    **waitlist_fields,
                     "seat_status": refreshed_status,
                     "seats_available": option.open_seats,
                     "seat_capacity": option.seat_capacity,
@@ -1899,6 +1966,7 @@ class SeatRefreshService:
                 }
                 updates[key] = update
                 cache_rows[key] = {
+                    **waitlist_fields,
                     "term": term_key,
                     "schedule_number": class_number,
                     "seat_status": refreshed_status.value,
@@ -1914,6 +1982,15 @@ class SeatRefreshService:
                 "linked_modals", lambda: self._refresh_linked_component_seats(
                     client, loaded, source,
                     parsed_term_code=getattr(parsed, "term_code", None),
+                    waitlist_modal_numbers={
+                        option.class_number.strip()
+                        for option in parsed.options
+                        if getattr(option, "class_number", None)
+                        and option.status is SeatStatus.WAITLIST
+                        and not (option.open_seats is not None and option.open_seats > 0)
+                        and (getattr(option, "waitlist_available", None) is None
+                             or getattr(option, "waitlist_capacity", None) is None)
+                    },
                     cache_rows=cache_rows,
                     updates=updates,
                     refreshed_at=refreshed_at,
@@ -2053,6 +2130,11 @@ class SeatRefreshService:
                 "seat_capacity": raw.get("seat_capacity"),
                 "seats_enrolled": raw.get("seats_enrolled"),
                 "seat_updated_at": raw.get("updated_at"),
+                **{
+                    name: raw[name]
+                    for name in ("waitlist_available", "waitlist_capacity", "waitlist_total")
+                    if name in raw and raw[name] is not None
+                },
             }
         self.repository.apply_seat_updates(updates)
 
@@ -2581,6 +2663,9 @@ class SeatRefreshService:
                 "seats_available": section.seats_available,
                 "seat_capacity": section.seat_capacity,
                 "seats_enrolled": section.seats_enrolled,
+                "waitlist_available": section.waitlist_available,
+                "waitlist_capacity": section.waitlist_capacity,
+                "waitlist_total": section.waitlist_total,
                 "instructor": section.instructor,
                 "updated_at": section.seat_updated_at or cached.get("updated_at"),
             }
