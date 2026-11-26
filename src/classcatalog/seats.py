@@ -407,6 +407,11 @@ class SeatRefreshService:
         self._missing_numbers_by_source: dict[str, set[str]] = {}
         self._unlisted_numbers_by_source: dict[str, set[str]] = {}
         self._interests: dict[str, float] = {}
+        # Remember which exact physical classes were viewed, not just their shared
+        # course source. A single course page can contain dozens of linked sections.
+        self._viewed_class_expirations: dict[tuple[str, str], float] = {}
+        # Failed exact-class modal lookups should not monopolize future refreshes.
+        self._linked_modal_retry_after: dict[tuple[str, str], float] = {}
         # CLASSCATALOG_SEAT_FRESHNESS_ARCH_V1: persistent browser-saved demand is
         # lower priority than visible classes and bounded by routine turns.
         self._saved_interests: dict[str, float] = {}
@@ -568,6 +573,7 @@ class SeatRefreshService:
                     continue
                 for source_url in self._source_by_schedule.get(schedule, ()):
                     self._interests[source_url] = expires
+                    self._viewed_class_expirations[(source_url, schedule)] = expires
                     added_sources.add(source_url)
         if added_sources:
             self._wake.set()
@@ -1499,41 +1505,63 @@ class SeatRefreshService:
         visible_numbers = {
             action.class_number for action in find_class_number_actions(loaded.html)
         }
-        missing = (
-            set(source.schedule_to_term)
-            & visible_numbers
-            - {schedule for _term, schedule in cache_rows}
-        )
-        # Also verify primary Waitlist rows when the grid does not expose
-        # authoritative Waitlist Available Places. Do not stamp cached values fresh.
+        expected_numbers = set(source.schedule_to_term)
+        grid_verified_numbers = {schedule for _term, schedule in cache_rows}
+        missing = expected_numbers & visible_numbers - grid_verified_numbers
+        # Verify primary Waitlist rows whose grid lacks authoritative counts.
         waitlist_modals = (
-                (waitlist_modal_numbers or set())
-                & visible_numbers
-                & set(source.schedule_to_term)
+            (waitlist_modal_numbers or set()) & visible_numbers & expected_numbers
         )
-        targets = missing | waitlist_modals
-        if not targets:
-            return
+        visible_targets = missing | waitlist_modals
 
-        # Prioritize missing physical components ahead of extra waitlist lookups.
-        # Give an actively viewed course at most two *extra* modal attempts after
-        # the routine fallback budget. All modal responses still require matching
-        # class numbers and complete availability data.
+        # One explicitly viewed, missing class can be recovered even if absent
+        # from the initial page actions: the session client opens its modal from
+        # fresh state and expands option pagination until it finds that class.
+        # Preserve the exact-class and CA-tab verification below. Do NOT run
+        # these extra lookups on routine background course sweeps.
         with self._lock:
-            viewed_grace = 2 if self._interests.get(source.url, 0.0) > time.time() else 0
-            candidates = sorted(
-                targets,
-                key=lambda number: (
-                    number not in missing,
-                    _parse_iso_timestamp(
-                        self._records.get(
-                            (source.schedule_to_term[number], number), {}
-                        ).get("updated_at")
-                    ) or 0.0,
-                    number,
-                ),
+            now = time.time()
+            viewed = self._interests.get(source.url, 0.0) > now
+            viewed_grace = 2 if viewed else 0
+
+            def candidate_age(number: str) -> float:
+                key = (source.schedule_to_term[number], number)
+                return _parse_iso_timestamp(
+                    self._records.get(key, {}).get("updated_at")
+                ) or 0.0
+
+            def viewed_first(number: str) -> tuple[bool, float, str]:
+                return (
+                    self._viewed_class_expirations.get((source.url, number), 0.0) <= now,
+                    candidate_age(number), number,
+                )
+
+            visible_candidates = sorted(
+                (number for number in visible_targets
+                 if self._linked_modal_retry_after.get((source.url, number), 0.0) <= now),
+                key=lambda number: (number not in missing, *viewed_first(number)),
             )
-        for number in candidates[:MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE]:
+            hidden_candidates = sorted(
+                (number for number in expected_numbers - visible_numbers - grid_verified_numbers
+                 if self._linked_modal_retry_after.get((source.url, number), 0.0) <= now),
+                key=viewed_first,
+            ) if viewed else []
+
+            # Reserve at most ONE of the existing four lookup slots for a viewed
+            # hidden section; this cannot increase the max requests per course.
+            limit = MAX_LINKED_SEAT_MODAL_LOOKUPS_PER_SOURCE
+            candidates = (
+                [hidden_candidates[0], *visible_candidates[:limit - 1]]
+                if hidden_candidates else visible_candidates[:limit]
+            )
+        if viewed and (hidden_candidates or visible_candidates):
+            LOGGER.info(
+                "seat_linked_component_plan course=%s visible_targets=%s "
+                "hidden_targets=%s selected=%s",
+                ", ".join(source.course_codes[:3]), len(visible_candidates),
+                len(hidden_candidates), ",".join(candidates),
+            )
+        for number in candidates:
             # Preserve already-verified primary seats rather than starting another
             # potentially slow class-modal fetch after the optional work budget.
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
@@ -1566,6 +1594,10 @@ class SeatRefreshService:
                         "Class Availability modal omitted verified waitlist counts"
                     )
             except Exception as exc:  # noqa: BLE001 - one lab cannot block other seats
+                with self._lock:
+                    # Per-class cooldown: repeated unverified modals must not
+                    # starve other linked components of their four lookup slots.
+                    self._linked_modal_retry_after[(source.url, number)] = time.time() + 600.0
                 LOGGER.warning(
                     "seat_linked_component_modal_failed course=%s class=%s "
                     "error=%s: %s",
@@ -1576,6 +1608,8 @@ class SeatRefreshService:
                 )
                 continue
 
+            with self._lock:
+                self._linked_modal_retry_after.pop((source.url, number), None)
             # Open seats win over a delayed Waitlist/Closed status, just as they
             # do for ordinary option rows. Unknown status does not override data.
             if live.seats_available > 0:
