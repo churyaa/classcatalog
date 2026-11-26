@@ -30,7 +30,9 @@ from classcatalog.scraping.constants import DETAIL_URL, INSTITUTION_CODE
 from classcatalog.scraping.course_option_pagination import CourseOptionPaginationError
 from classcatalog.scraping.parser import ResultParseError, parse_course_info_page
 from classcatalog.scraping.session import (
+    PeopleSoftCircuitBreakerOpen,
     PeopleSoftSessionError,
+    PeopleSoftTransientError,
     SdsuHttpConfig,
     SdsuPeopleSoftSession,
 )
@@ -137,6 +139,8 @@ SEAT_SUBJECT_BATCH_MAX_AGE_GAP_SECONDS = 900.0
 SEAT_SUBJECT_BATCH_MAX_OVERTAKEN_PAGES = 12
 # CLASSCATALOG_BOUNDED_VIEWED_REFRESH_V1: guarantee periodic catalog-wide progress.
 SEAT_MAX_VIEWED_BURST = 4
+# CLASSCATALOG_VERIFIED_SUBJECT_SESSION_REUSE_V1: experimental, OFF by default.
+SEAT_SUBJECT_SESSION_REUSE_ENV = "CLASSCATALOG_SEAT_REUSE_SUBJECT_SESSION"
 
 
 def _has_explicit_no_scheduled_classes_message(html: str) -> bool:
@@ -272,6 +276,10 @@ class SeatRefreshService:
             else _env_int(SEAT_STALE_AFTER_ENV, DEFAULT_STALE_AFTER_SECONDS, minimum=60)
         )
         self._session_factory = session_factory or self._default_session_factory
+        self.subject_session_reuse_enabled = (
+            os.getenv(SEAT_SUBJECT_SESSION_REUSE_ENV, "0").strip().lower()
+            in {"1", "yes", "true", "on"}
+        )
         self._instructor_records = load_instructor_cache(self.instructor_cache_path)
         self.repository.apply_instructor_updates({
             key: str(raw.get("instructor") or "")
@@ -1077,6 +1085,83 @@ class SeatRefreshService:
             )
         return None
 
+    @staticmethod
+    def _reuse_search_proves_target(pages, result, context, source: SeatSource) -> bool:
+        """Reject ambiguous/wrong-target searches before using live Fluid state.
+
+        Course identity comes from a freshly returned exact-subject result row,
+        not the URL alone. Final seat updates *also* require the existing
+        verified course/term/class-number checks in _refresh_source.
+        """
+        term, strm, subject = context
+        if (
+            pages.verified_absent or pages.subject != subject
+            or pages.term != term or pages.term_code != strm
+            or result.term != term or result.term_code != strm
+            or result.subject != subject or result.complete is not True
+            or not result.courses or not source.recovery_detail_url
+        ):
+            return False
+        identifiers = parse_qs(urlparse(source.recovery_detail_url).query)
+        crse_id = (identifiers.get("CRSE_ID") or [""])[0]
+        offer = (identifiers.get("CRSE_OFFER_NBR") or [""])[0]
+        if not crse_id or not offer:
+            return False
+        return any(
+            hit.term == term and hit.term_code == strm and hit.subject == subject
+            and hit.course_code in source.course_codes
+            and str(hit.crse_id or "") == crse_id
+            and str(hit.crse_offer_nbr or "") == offer
+            for hit in result.courses
+        )
+
+    def _prepare_worker_subject(
+        self, client: SdsuPeopleSoftSession, context: tuple[str, str, str],
+        source: SeatSource, *, can_reuse: bool,
+    ) -> bool:
+        """Use no-reset search only if valid; otherwise run legacy fresh reset.
+
+        Returns True only when the *same* public session was safely reused.
+        A failed/incomplete/wrong-target search never reaches a seat update.
+        """
+        term, strm, subject = context
+        if can_reuse:
+            with self._lock:
+                self._seat_throughput_events.append((time.time(), "reuse_attempt", 0))
+            generation_before = client.public_session_generation
+            try:
+                pages = client.rehydrate_subject_context(
+                    term=term, term_code=strm, subject=subject, reset_session=False,
+                )
+                result = client.parse_subject_pages(pages)
+                if not self._reuse_search_proves_target(pages, result, context, source):
+                    raise ValueError("Reused subject search did not prove the exact offering")
+                if client.public_session_generation != generation_before:
+                    # The scraper's internal state-recovery already reset the
+                    # session. This was a valid fresh setup, not actual reuse.
+                    with self._lock:
+                        self._seat_throughput_events.append((time.time(), "reuse_internal_reset", 0))
+                    return False
+                with self._lock:
+                    self._seat_throughput_events.append((time.time(), "reuse_verified", 0))
+                return True
+            except (PeopleSoftTransientError, PeopleSoftCircuitBreakerOpen):
+                # Respect SDSU throttling and circuit breakers: no immediate
+                # extra fresh-session request after a rate-limit/final failure.
+                raise
+            except Exception as exc:
+                with self._lock:
+                    self._seat_throughput_events.append((time.time(), "reuse_fallback", 0))
+                LOGGER.warning(
+                    "seat_subject_session_reuse_rejected term=%s subject=%s error_type=%s",
+                    term, subject, type(exc).__name__,
+                )
+                # A failed reused search can leave opaque PeopleSoft state.
+                # One fresh reset is mandatory; the existing worker catches
+                # failures of this fresh attempt and preserves prior seats.
+        client.rehydrate_subject_context(term=term, term_code=strm, subject=subject)
+        return False
+
     def _run(self) -> None:
         # SEAT_WORKER_SUBJECT_CONTEXT_V1: prime PeopleSoft before stored URLs.
         # Preserve manual requests, student interest, and the existing 4:1
@@ -1088,6 +1173,7 @@ class SeatRefreshService:
                 with self._session_factory() as client:
                     client.bootstrap()
                     active_context: tuple[str, str, str] | None = None
+                    healthy_session = False
                     self._worker_context_affinity = None
                     while not self._stop.is_set():
                         source_url = self._next_source(iteration)
@@ -1102,20 +1188,27 @@ class SeatRefreshService:
                             # Do not trust any previous subject for an ambiguous
                             # source. Existing per-source recovery remains intact.
                             active_context = None
+                            healthy_session = False
                             self._worker_context_affinity = None
                         elif needed_context != active_context:
                             started = time.monotonic()
                             try:
                                 term, term_code, subject = needed_context
-                                client.rehydrate_subject_context(
-                                    term=term,
-                                    term_code=term_code,
-                                    subject=subject,
+                                reused = self._prepare_worker_subject(
+                                    client, needed_context, source,
+                                    can_reuse=(
+                                        self.subject_session_reuse_enabled
+                                        and healthy_session
+                                        and active_context is not None
+                                        and self._worker_context_affinity == active_context
+                                        and isinstance(getattr(client, "public_session_generation", None), int)
+                                    ),
                                 )
                             except Exception as exc:
                                 # A context failure is a source failure, never
                                 # a successful seat refresh or removal signal.
                                 active_context = None
+                                healthy_session = False
                                 self._worker_context_affinity = None
                                 self._record_source_failure(
                                     source_url,
@@ -1136,10 +1229,11 @@ class SeatRefreshService:
                             with self._lock:
                                 self._seat_throughput_events.append((time.time(), "context", 0))
                             LOGGER.info(
-                                "seat_subject_context_ready term=%s subject=%s",
-                                term, subject,
+                                "seat_subject_context_ready term=%s subject=%s reused=%s",
+                                term, subject, reused,
                             )
                         failures_before = self._failed_sources
+                        successful_before = self._successful_sources
                         page_started = time.monotonic()
                         try:
                             self._refresh_source(client, source_url)
@@ -1156,7 +1250,12 @@ class SeatRefreshService:
                             # Session-reset fallbacks invalidate worker affinity
                             # even when a recovered course page succeeds.
                             active_context = None
+                            healthy_session = False
                             self._worker_context_affinity = None
+                        else:
+                            # Do NOT treat an unverified/unfinished page as a
+                            # healthy session for the next subject transition.
+                            healthy_session = self._successful_sources > successful_before
                         self._flush_cache()
             except Exception as exc:  # noqa: BLE001 - keep the worker alive
                 self._worker_context_affinity = None
@@ -2108,6 +2207,7 @@ class SeatRefreshService:
                 "stale_after_seconds": self.stale_after_seconds,
                 "priority_interval_seconds": self.priority_interval_seconds,
                 "preferred_term": self.preferred_term,
+                "subject_session_reuse_enabled": self.subject_session_reuse_enabled,
                 "preferred_source_pages": len(self._preferred_sources),
                 "saved_priority_sources": len(self._saved_interests),
                 "other_source_pages": len(self._other_sources),
@@ -2280,6 +2380,13 @@ class SeatRefreshService:
             }
         return {
             "seat_refresh_phases_last_300s": phase_summary,
+            "subject_session_reuse": {
+                "enabled": self.subject_session_reuse_enabled,
+                "attempts_last_300s": sum(kind == "reuse_attempt" for _, kind, _ in self._seat_throughput_events),
+                "verified_last_300s": sum(kind == "reuse_verified" for _, kind, _ in self._seat_throughput_events),
+                "fallbacks_last_300s": sum(kind == "reuse_fallback" for _, kind, _ in self._seat_throughput_events),
+                "internal_resets_last_300s": sum(kind == "reuse_internal_reset" for _, kind, _ in self._seat_throughput_events),
+            },
             "recovery_deferred_last_300s": sum(
                 kind == "recovery_deferred" for _, kind, _ in self._seat_throughput_events
             ),

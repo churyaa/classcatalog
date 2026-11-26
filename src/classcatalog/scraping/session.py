@@ -260,6 +260,8 @@ class SdsuPeopleSoftSession:
         self._landing_html: str | None = None
         self._last_request_finished_at: float | None = None
         self._consecutive_state_failures = 0
+        # Monotonic token: an internal recovery may discard the public session.
+        self._public_session_generation = 0
         self._partition_cache = (
             PartitionBranchCache(
                 self.config.partition_cache_dir,
@@ -285,6 +287,11 @@ class SdsuPeopleSoftSession:
         if self._owns_session:
             self._session.close()
 
+    @property
+    def public_session_generation(self) -> int:
+        """Incremented whenever public cookies/component state are discarded."""
+        return self._public_session_generation
+
     def reset_public_session(self) -> None:
         """Discard cookies/component state and force a fresh public bootstrap.
 
@@ -307,6 +314,7 @@ class SdsuPeopleSoftSession:
                 clear()
         self._bootstrapped = False
         self._landing_html = None
+        self._public_session_generation += 1
         # A new HTTP session invalidates all previously observed Fluid component state.
         self._live_partition_state = None
 
