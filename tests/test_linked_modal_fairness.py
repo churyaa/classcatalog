@@ -92,3 +92,58 @@ def test_nonviewed_hidden_classes_do_not_add_modal_requests(monkeypatch, tmp_pat
         source, parsed_term_code="2273", cache_rows={}, updates={},
         refreshed_at="2026-11-26T08:00:00+00:00",
     )
+
+
+def test_unverified_grid_waitlist_row_cannot_hide_viewed_component(monkeypatch, tmp_path):
+    """A status-only grid row must not suppress the viewed class's CA lookup."""
+    svc = service(tmp_path)
+    svc.register_interest(("3991",))
+    parsed = CourseInfoRecord(
+        term="Spring 2027", term_code="2273", subject="CHEM",
+        catalog_number="201", course_code="CHEM 201", title="General Chemistry",
+        units=5, units_min=5, units_max=5, units_text="5 units", grading="letter",
+        options=(
+            CourseClassOption(
+                option_number=1, option_group_index=1, status=SeatStatus.WAITLIST,
+                class_number="3976", open_seats=0, seat_capacity=32,
+                seats_enrolled=32, source_row_index=0,
+            ),
+            CourseClassOption(
+                option_number=2, option_group_index=2, status=SeatStatus.WAITLIST,
+                class_number="3991", open_seats=0, seat_capacity=32,
+                seats_enrolled=32, source_row_index=1,
+            ),
+        ),
+    )
+    monkeypatch.setattr("classcatalog.seats.parse_course_info_page", lambda *_a, **_kw: parsed)
+    monkeypatch.setattr("classcatalog.seats.parse_class_information_page", lambda number: SimpleNamespace(
+        class_number=number, selected_tab_value="CA", status=SeatStatus.WAITLIST,
+        seats_available=0, seat_capacity=32, seats_enrolled=32,
+        waitlist_available=989 if number == "3991" else 990,
+        waitlist_capacity=999, waitlist_total=10 if number == "3991" else 9,
+    ))
+
+    class Client:
+        def __init__(self):
+            self.requested = []
+
+        def fetch_course_info_page(self, _url):
+            # Lecture is clickable; viewed discussion is present in parsed
+            # options but not among this page's clickable class actions.
+            html = ('<a id="SSR_CLSRCH_F_WK_SSR_CMPNT_DESCR_1$294$$0">'
+                    'Lrg Lect - 3976</a>')
+            return SimpleNamespace(html=html, canonical_url=URL, expansion_count=0)
+
+        def fetch_class_detail_tab_page(self, _url, number, tab):
+            assert tab == "CA"
+            self.requested.append(number)
+            return SimpleNamespace(html=number)
+
+    client = Client()
+    svc._refresh_source(client, URL)
+    assert client.requested and client.requested[0] == "3991"
+    assert len(client.requested) <= 4
+    record = svc.seat_records(("3991",))["Spring 2027::3991"]
+    assert record["waitlist_available"] == 989
+    assert record["waitlist_capacity"] == 999
+    assert record["updated_at"] is not None

@@ -1506,7 +1506,14 @@ class SeatRefreshService:
             action.class_number for action in find_class_number_actions(loaded.html)
         }
         expected_numbers = set(source.schedule_to_term)
-        grid_verified_numbers = {schedule for _term, schedule in cache_rows}
+        # A cache row is not necessarily fresh: waitlisted grid rows without
+        # independently verified numeric availability deliberately retain their
+        # previous updated_at. Only updates stamped by this refresh are verified.
+        grid_verified_numbers = {
+            schedule
+            for (_term, schedule), update in updates.items()
+            if update.get("seat_updated_at") == refreshed_at
+        }
         missing = expected_numbers & visible_numbers - grid_verified_numbers
         # Verify primary Waitlist rows whose grid lacks authoritative counts.
         waitlist_modals = (
