@@ -390,6 +390,10 @@ class SeatRefreshService:
 
         self._records: dict[tuple[str, str], dict[str, object]] = {}
         self._source_last_success: dict[str, float] = {}
+        # CLASSCATALOG_SINGLE_WORKER_PRIORITY_EFFICIENCY_V1
+        # A verified exact-class modal is NOT a full-course success. Keep
+        # this marker separate to unlock one bounded same-subject follow-up.
+        self._source_last_viewed_verified: dict[str, float] = {}
         self._source_last_attempt: dict[str, float] = {}
         self._source_retry_after: dict[str, float] = {}
         self._source_failure_streak: dict[str, int] = {}
@@ -827,6 +831,31 @@ class SeatRefreshService:
                 return url
         return None
 
+    def _has_stale_viewed_class_locked(self, source_url: str, now: float) -> bool:
+        """Avoid costly priority refreshes when every viewed class is fresh.
+
+        An exact-class modal may verify just one physical component,
+        not the entire PeopleSoft option grid. Use the per-class verified
+        timestamp, not source_last_success, to decide if it needs work.
+        Also respect class-level modal cooldown after a failed lookup.
+        Caller holds self._lock; no network access occurs here.
+        """
+        saw_active_view = False
+        for number, term_code in self._sources[source_url].schedule_to_term.items():
+            if self._viewed_class_expirations.get((source_url, number), 0.0) <= now:
+                continue
+            saw_active_view = True
+            if self._linked_modal_retry_after.get((source_url, number), 0.0) > now:
+                continue
+            verified_at = _parse_iso_timestamp(
+                self._records.get((term_code, number), {}).get("updated_at")
+            )
+            if verified_at is None or verified_at < now - self.stale_after_seconds:
+                return True
+        # Keep legacy source-only interest behavior if an integration
+        # registered a source without specific physical class keys.
+        return not saw_active_view
+
     def _choose_viewed_source_locked(self, urls: list[str], now: float) -> str:
         """Prefer eligible viewed pages, optionally reusing verified subject context.
 
@@ -973,7 +1002,10 @@ class SeatRefreshService:
                 if (
                     context is not None
                     and context == self._worker_context_affinity
-                    and self._source_last_success.get(viewed_url, 0.0) >= selected_at
+                    and max(
+                        self._source_last_success.get(viewed_url, 0.0),
+                        self._source_last_viewed_verified.get(viewed_url, 0.0),
+                    ) >= selected_at
                 ):
                     sibling = self._choose_context_followup_locked(context, now)
                     if sibling is not None:
@@ -1003,6 +1035,7 @@ class SeatRefreshService:
                 if self._source_retry_after.get(url, 0.0) <= now
                 and now - self._source_last_attempt.get(url, 0.0)
                     >= self.priority_interval_seconds
+                and self._has_stale_viewed_class_locked(url, now)
             ]
             if viewed and self._consecutive_viewed_selections < SEAT_MAX_VIEWED_BURST:
                 return self._choose_viewed_source_locked(viewed, now)
@@ -1803,6 +1836,7 @@ class SeatRefreshService:
         with self._lock:
             self._records.update(cache_rows)
             self._update_freshness_index_locked(cache_rows)
+            self._source_last_viewed_verified[source_url] = completed
             self._last_success_at = completed
             self._last_error = None
             self._last_sections_updated = len(cache_rows)
