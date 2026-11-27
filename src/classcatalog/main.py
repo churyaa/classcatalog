@@ -918,17 +918,34 @@ def create_app(
     async def current_seats(
         response: Response,
         schedule_number: Annotated[list[str] | None, Query()] = None,
+        section_key: Annotated[list[str] | None, Query()] = None,
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
         requested = tuple(dict.fromkeys(
             str(value).strip() for value in (schedule_number or ()) if str(value).strip()
         ))
-        if len(requested) > 250:
+        qualified = tuple(dict.fromkeys(
+            str(value).strip() for value in (section_key or ()) if str(value).strip()
+        ))
+        if len(requested) + len(qualified) > 250:
             raise HTTPException(status_code=400, detail="At most 250 class numbers can be requested at once.")
+        for value in qualified:
+            term, separator, schedule = value.rpartition("::")
+            if not separator or not (0 < len(term) <= 64) or not (1 <= len(schedule) <= 12) or not schedule.isascii() or not schedule.isdigit():
+                raise HTTPException(status_code=400, detail="section_key must use Term::ClassNumber.")
         if active_seat_service is not None:
-            active_seat_service.register_interest(requested)
-            records = await run_in_threadpool(active_seat_service.seat_records, requested)
+            if qualified:
+                active_seat_service.register_interest(requested, section_keys=qualified)
+                records = await run_in_threadpool(
+                    active_seat_service.seat_records, requested, section_keys=qualified,
+                )
+            else:
+                # Preserve the exact API behavior expected by older browser clients.
+                active_seat_service.register_interest(requested)
+                records = await run_in_threadpool(active_seat_service.seat_records, requested)
         else:
+            chosen = set(qualified)
+            all_numbers = tuple(dict.fromkeys((*requested, *(key.rpartition("::")[2] for key in qualified))))
             records = {
                 f"{section.term}::{schedule}": {
                     "schedule_number": schedule,
@@ -943,7 +960,8 @@ def create_app(
                     "instructor": section.instructor,
                     "updated_at": None,
                 }
-                for (_term, schedule), section in active_repository.seat_snapshot(requested).items()
+                for (_term, schedule), section in active_repository.seat_snapshot(all_numbers).items()
+                if schedule in requested or f"{section.term}::{schedule}" in chosen
             }
         return {"records": records}
 
@@ -963,6 +981,8 @@ def create_app(
             priority_sources = 0
         elif payload.kind == "saved":
             priority_sources = active_seat_service.register_saved_interest(requested, section_keys=section_keys)
+        elif section_keys:
+            priority_sources = active_seat_service.register_interest(requested, section_keys=section_keys)
         else:
             priority_sources = active_seat_service.register_interest(requested)
         return {"priority_sources": priority_sources}
@@ -1517,11 +1537,20 @@ def create_app(
         if elapsed >= 1.0:
             LOGGER.warning("slow_class_search duration_seconds=%.3f", elapsed)
         if active_seat_service is not None:
-            schedules = []
+            # Class numbers are recycled between terms. A Spring search must
+            # not prioritize an unrelated Fall course with the same number.
+            section_keys = []
             for item in result.items:
-                schedules.append(item.schedule_number)
-                schedules.extend(component.schedule_number for component in item.linked_components)
-            active_seat_service.register_interest(tuple(schedules))
+                term = str(item.term).strip()
+                section_keys.append(f"{term}::{item.schedule_number}")
+                section_keys.extend(
+                    f"{term}::{component.schedule_number}"
+                    for component in item.linked_components
+                )
+            if section_keys:
+                active_seat_service.register_interest(
+                    (), section_keys=tuple(dict.fromkeys(section_keys)),
+                )
         return result
 
     return app

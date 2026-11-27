@@ -448,6 +448,23 @@ function favoriteScheduleNumbers() {
   ]).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
+// Send term-qualified public seat requests. Class numbers recur each semester.
+// Never ship favorites/schedule contents; only the requested physical keys.
+function seatSectionKeysFor(sections) {
+  const keys = sections.flatMap((section) => {
+    const term = String(section?.term || "").trim();
+    if (!term || term.includes("::")) return [];
+    return [
+      section.schedule_number,
+      ...(Array.isArray(section.linked_components) ? section.linked_components : [])
+        .map((component) => component.schedule_number),
+    ].map((number) => String(number || "").trim())
+      .filter((number) => /^\d{1,12}$/.test(number))
+      .map((number) => `${term}::${number}`);
+  });
+  return [...new Set(keys)].slice(0, 250);
+}
+
 // CLASSCATALOG_SEAT_FRESHNESS_ARCH_V1: only known class numbers leave
 // this browser; favorite/schedule contents remain localStorage-only.
 let savedSeatInterestTimer = null;
@@ -976,10 +993,10 @@ function scheduleScheduleNumbers() {
 }
 
 async function refreshScheduleSeats() {
-  const schedules = scheduleScheduleNumbers();
-  if (!schedules.length) return;
+  const sectionKeys = seatSectionKeysFor(scheduledSections());
+  if (!sectionKeys.length) return;
   const params = new URLSearchParams();
-  schedules.slice(0, 250).forEach((schedule) => params.append("schedule_number", schedule));
+  sectionKeys.forEach((key) => params.append("section_key", key));
   try {
     const payload = await fetchJson(`/api/seats?${params.toString()}`, { cache: "no-store" });
     const records = payload.records || {};
@@ -1447,10 +1464,10 @@ function setupScheduleDrawer() {
 }
 
 async function refreshFavoritesSeats() {
-  const schedules = favoriteScheduleNumbers();
-  if (!schedules.length) return;
+  const sectionKeys = seatSectionKeysFor(favoriteSections());
+  if (!sectionKeys.length) return;
   const params = new URLSearchParams();
-  schedules.slice(0, 250).forEach((schedule) => params.append("schedule_number", schedule));
+  sectionKeys.forEach((key) => params.append("section_key", key));
   try {
     const payload = await fetchJson(`/api/seats?${params.toString()}`, { cache: "no-store" });
     const records = payload.records || {};

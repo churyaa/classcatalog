@@ -570,7 +570,15 @@ class SeatRefreshService:
             thread.join(timeout=timeout)
         self._flush_cache(force=True)
 
-    def register_interest(self, schedule_numbers: Sequence[str]) -> int:
+    def register_interest(
+        self, schedule_numbers: Sequence[str], *, section_keys: Sequence[str] = (),
+    ) -> int:
+        """Prioritize exact term/class pairs; preserve legacy number-only clients.
+
+        A class number can occur in multiple terms. Only unqualified legacy
+        requests expand to all of them. Viewed classes keep their exact-class
+        modal priority without changing source cooldown or admin precedence.
+        """
         now = time.time()
         expires = now + self.interest_ttl_seconds
         added_sources: set[str] = set()
@@ -580,6 +588,14 @@ class SeatRefreshService:
                 if not schedule:
                     continue
                 for source_url in self._source_by_schedule.get(schedule, ()):
+                    self._interests[source_url] = expires
+                    self._viewed_class_expirations[(source_url, schedule)] = expires
+                    added_sources.add(source_url)
+            for raw in section_keys:
+                term, separator, schedule = str(raw).strip().rpartition("::")
+                if not separator or not term or not schedule:
+                    continue
+                for source_url in self._source_by_term_schedule.get((term, schedule), ()):
                     self._interests[source_url] = expires
                     self._viewed_class_expirations[(source_url, schedule)] = expires
                     added_sources.add(source_url)
@@ -2852,11 +2868,21 @@ class SeatRefreshService:
             )
         return public
 
-    def seat_records(self, schedule_numbers: Sequence[str]) -> dict[str, dict[str, object]]:
-        wanted = {str(value).strip() for value in schedule_numbers if str(value).strip()}
+    def seat_records(
+        self, schedule_numbers: Sequence[str], *, section_keys: Sequence[str] = (),
+    ) -> dict[str, dict[str, object]]:
+        unqualified = {str(value).strip() for value in schedule_numbers if str(value).strip()}
+        qualified = set()
+        for raw in section_keys:
+            term, separator, schedule = str(raw).strip().rpartition("::")
+            if separator and term and schedule:
+                qualified.add((term, schedule))
+        wanted = unqualified | {schedule for _term, schedule in qualified}
         current = self.repository.seat_snapshot(tuple(wanted))
         records: dict[str, dict[str, object]] = {}
         for (term, schedule), section in current.items():
+            if schedule not in unqualified and (section.term, schedule) not in qualified:
+                continue
             cached = self._records.get((term, schedule), {})
             records[f"{section.term}::{schedule}"] = {
                 "schedule_number": schedule,

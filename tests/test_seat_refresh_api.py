@@ -23,8 +23,8 @@ class FakeSeatService:
     def stop(self) -> None:
         self.stops += 1
 
-    def register_interest(self, schedules) -> int:
-        self.interests = tuple(schedules)
+    def register_interest(self, schedules, *, section_keys=()) -> int:
+        self.interests = tuple(schedules) + tuple(section_keys)
         return 2
 
     def register_saved_interest(self, schedules, *, section_keys=()) -> int:
@@ -75,8 +75,8 @@ class FakeSeatService:
             ],
         }
 
-    def seat_records(self, schedules):
-        return {
+    def seat_records(self, schedules, *, section_keys=()):
+        records = {
             "Summer 2026::1234": {
                 "schedule_number": "1234",
                 "term": "Summer 2026",
@@ -86,6 +86,10 @@ class FakeSeatService:
                 "seats_enrolled": 26,
                 "updated_at": "2026-08-25T12:00:00+00:00",
             }
+        }
+        return {
+            key: value for key, value in records.items()
+            if value["schedule_number"] in schedules or key in section_keys
         }
 
     def request_full_refresh(self) -> int:
