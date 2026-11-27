@@ -34,6 +34,8 @@ def test_stage_timing_empty_is_safe_and_public(tmp_path: Path) -> None:
         'course_page_seconds': 0,
         'course_page_avg_seconds': None,
         'course_page_max_seconds': None,
+        'viewed_class_attempts': 0,
+        'viewed_class_seconds': 0,
     }
     assert service.admin_status()['seat_refresh_throughput']['worker_stage_timing_last_300s'] == timing
 

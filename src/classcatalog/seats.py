@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 from threading import Event, RLock, Thread
+from types import SimpleNamespace
 import time
 from typing import Callable, Mapping, Sequence
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -46,6 +47,8 @@ SEAT_PREFERRED_TERM_ENV = "CLASSCATALOG_SEAT_PREFERRED_TERM"  # SPRING_SEAT_REFR
 SEAT_INTEREST_TTL_ENV = "CLASSCATALOG_SEAT_INTEREST_TTL_SECONDS"
 SEAT_BROWSER_POLL_ENV = "CLASSCATALOG_SEAT_BROWSER_POLL_SECONDS"
 SEAT_STALE_AFTER_ENV = "CLASSCATALOG_SEAT_STALE_AFTER_SECONDS"
+SEAT_HTTP_TIMEOUT_ENV = "CLASSCATALOG_SEAT_HTTP_TIMEOUT_SECONDS"
+SEAT_HTTP_RETRIES_ENV = "CLASSCATALOG_SEAT_HTTP_GET_RETRIES"
 
 DEFAULT_REQUEST_DELAY_SECONDS = 0.75
 DEFAULT_PRIORITY_INTERVAL_SECONDS = 180.0
@@ -416,6 +419,7 @@ class SeatRefreshService:
         # lower priority than visible classes and bounded by routine turns.
         self._saved_interests: dict[str, float] = {}
         self._manual_queue: deque[str] = deque()
+        self._next_selected_was_manual = False
         self._cycle_seen: set[str] = set()
         self._last_full_cycle_at: float | None = None
         self._last_attempt_at: float | None = None
@@ -452,10 +456,14 @@ class SeatRefreshService:
         self._apply_cached_records()
 
     def _default_session_factory(self) -> SdsuPeopleSoftSession:
+        # Seat refresh needs shorter per-request failure bounds than a full
+        # structural scrape. Requests' timeout is not a whole-course deadline;
+        # changing it here affects only the background seat worker.
         config = SdsuHttpConfig(
             delay_seconds=self.request_delay_seconds,
             jitter_seconds=min(max(self.request_delay_seconds * 0.2, 0.0), 0.25),
-            max_retries=2,
+            timeout_seconds=_env_float(SEAT_HTTP_TIMEOUT_ENV, 20.0, minimum=8.0),
+            max_retries=min(_env_int(SEAT_HTTP_RETRIES_ENV, 1, minimum=0), 2),
         )
         return SdsuPeopleSoftSession(config)
 
@@ -920,10 +928,12 @@ class SeatRefreshService:
     def _next_source(self, iteration: int) -> str | None:
         now = time.time()
         with self._lock:
+            self._next_selected_was_manual = False
             # Admin requests remain absolute priority, even on cooldown.
             while self._manual_queue:
                 url = self._manual_queue.popleft()
                 if url in self._sources:
+                    self._next_selected_was_manual = True
                     # Manual work always preempts and cancels any follow-up.
                     self._context_followup_after = None
                     self._routine_followup_after = None
@@ -1185,6 +1195,11 @@ class SeatRefreshService:
                         source_url = self._next_source(iteration)
                         iteration += 1
                         if source_url is None:
+                            # A stop request may arrive while choosing the next
+                            # source; don't force every test and deployment to
+                            # wait the full five-second idle interval.
+                            if self._stop.is_set():
+                                break
                             self._wake.wait(5.0)
                             self._wake.clear()
                             continue
@@ -1241,13 +1256,22 @@ class SeatRefreshService:
                         failures_before = self._failed_sources
                         successful_before = self._successful_sources
                         page_started = time.monotonic()
+                        fast_result = "not_applicable"
                         try:
-                            self._refresh_source(client, source_url)
+                            # A viewed stale physical class deserves a direct,
+                            # exact-class CA verification before the potentially
+                            # huge complete option grid. Do not stamp the whole
+                            # source fresh when only one modal was checked.
+                            fast_result = self._refresh_viewed_class_fast(client, source_url)
+                            if fast_result == "not_applicable":
+                                self._refresh_source(client, source_url)
                         finally:
                             # Includes retries, parsing and in-page recovery.
                             with self._lock:
                                 self._seat_stage_durations.append((
-                                    time.time(), "page", time.monotonic() - page_started,
+                                    time.time(),
+                                    "viewed_worker" if fast_result != "not_applicable" else "page",
+                                    time.monotonic() - page_started,
                                 ))
                         if (
                             self._failed_sources != failures_before
@@ -1261,7 +1285,10 @@ class SeatRefreshService:
                         else:
                             # Do NOT treat an unverified/unfinished page as a
                             # healthy session for the next subject transition.
-                            healthy_session = self._successful_sources > successful_before
+                            healthy_session = (
+                                fast_result == "verified"
+                                or self._successful_sources > successful_before
+                            )
                         self._flush_cache()
             except Exception as exc:  # noqa: BLE001 - keep the worker alive
                 self._worker_context_affinity = None
@@ -1489,6 +1516,8 @@ class SeatRefreshService:
         refreshed_at: str,
         deadline_monotonic: float | None = None,
         waitlist_modal_numbers: set[str] | None = None,
+        requested_only: set[str] | None = None,
+        require_course_label: bool = False,
     ) -> None:
         """Read each missing linked class from its own Class Availability modal.
 
@@ -1506,6 +1535,8 @@ class SeatRefreshService:
             action.class_number for action in find_class_number_actions(loaded.html)
         }
         expected_numbers = set(source.schedule_to_term)
+        if requested_only is not None:
+            expected_numbers.intersection_update(requested_only)
         # A cache row is not necessarily fresh: waitlisted grid rows without
         # independently verified numeric availability deliberately retain their
         # previous updated_at. Only updates stamped by this refresh are verified.
@@ -1550,7 +1581,8 @@ class SeatRefreshService:
             )
             hidden_candidates = sorted(
                 (number for number in expected_numbers - visible_numbers - grid_verified_numbers
-                 if self._linked_modal_retry_after.get((source.url, number), 0.0) <= now),
+                 if self._viewed_class_expirations.get((source.url, number), 0.0) > now
+                 and self._linked_modal_retry_after.get((source.url, number), 0.0) <= now),
                 key=viewed_first,
             ) if viewed else []
 
@@ -1562,7 +1594,9 @@ class SeatRefreshService:
                 if hidden_candidates else visible_candidates[:limit]
             )
         if viewed and (hidden_candidates or visible_candidates):
-            LOGGER.info(
+            # Production filtering can suppress INFO; emit the bounded viewed
+            # selection at WARNING so a failed live class can be diagnosed.
+            LOGGER.warning(
                 "seat_linked_component_plan course=%s visible_targets=%s "
                 "hidden_targets=%s selected=%s",
                 ", ".join(source.course_codes[:3]), len(visible_candidates),
@@ -1600,6 +1634,16 @@ class SeatRefreshService:
                     raise ValueError(
                         "Class Availability modal omitted verified waitlist counts"
                     )
+                if require_course_label:
+                    # The full-grid path independently checks course identity;
+                    # the fast exact-modal path must obtain it from the modal.
+                    # No label or a different course must NOT mark seats fresh.
+                    course_label = str(getattr(live, "course_label", None) or "").strip().upper()
+                    if not course_label or not any(
+                        course_label == code.upper() or course_label.startswith(code.upper() + " ")
+                        for code in source.course_codes
+                    ):
+                        raise ValueError("Class modal omitted/mismatched course identity")
             except Exception as exc:  # noqa: BLE001 - one lab cannot block other seats
                 with self._lock:
                     # Per-class cooldown: repeated unverified modals must not
@@ -1657,6 +1701,108 @@ class SeatRefreshService:
                 "updated_at": refreshed_at,
                 "source_url": source.url,
             }
+
+    def _refresh_viewed_class_fast(
+        self, client: SdsuPeopleSoftSession, source_url: str,
+    ) -> str:
+        """Refresh ONE explicitly viewed stale class without a full course sweep.
+
+        Runs only inside the existing, single session worker AFTER verified
+        subject-context preparation. The same CA modal verifier, strict class
+        identity check, and waitlist numeric checks used for linked sections
+        are reused. A successful modal updates only that physical class; it
+        does not assert that the whole source/option grid is fresh.
+        """
+        # Admin-queued work intentionally requests a COMPLETE source refresh;
+        # never downgrade that operation to a single-class fast path.
+        if self._next_selected_was_manual:
+            return "not_applicable"
+        source = self._sources[source_url]
+        context = self._seat_source_context(source)
+        if context is None or set(source.schedule_to_term.values()) != {context[1]}:
+            return "not_applicable"
+        now = time.time()
+        with self._lock:
+            viewed_candidates: list[tuple[float, str]] = []
+            for number, term_code in source.schedule_to_term.items():
+                if self._viewed_class_expirations.get((source_url, number), 0.0) <= now:
+                    continue
+                if self._linked_modal_retry_after.get((source_url, number), 0.0) > now:
+                    continue
+                age = _parse_iso_timestamp(
+                    self._records.get((term_code, number), {}).get("updated_at")
+                ) or 0.0
+                if age >= now - self.stale_after_seconds:
+                    continue
+                viewed_candidates.append((age, number))
+            if not viewed_candidates:
+                return "not_applicable"
+            _, target = min(viewed_candidates)
+            self._source_last_attempt[source_url] = now
+            self._last_attempt_at = now
+            self._last_source = source_url
+            self._last_course = ", ".join(source.course_codes[:3])
+            for term_name in self._source_term_names.get(source_url, ()):
+                self._term_attempts[term_name] = self._term_attempts.get(term_name, 0) + 1
+
+        # The class modal loader starts with a fresh GET of this SAME source
+        # URL and expands only if the exact class is not initially visible.
+        # It does not need to fetch every enrollment option first.
+        cache_rows: dict[tuple[str, str], dict[str, object]] = {}
+        updates: dict[tuple[str, str], dict[str, object]] = {}
+        started = time.monotonic()
+        LOGGER.warning(
+            "seat_viewed_class_refresh_selected course=%s class=%s term_code=%s",
+            ", ".join(source.course_codes[:3]), target, context[1],
+        )
+        effective_url = self._resolved_url_by_source.get(source_url, source_url)
+        self._seat_timed_call(
+            "viewed_modal",
+            lambda: self._refresh_linked_component_seats(
+                client, SimpleNamespace(html="", canonical_url=effective_url),
+                source, parsed_term_code=context[1],
+                cache_rows=cache_rows, updates=updates,
+                refreshed_at=_utc_now(), requested_only={target},
+                require_course_label=True,
+            ),
+        )
+        target_key = (source.schedule_to_term[target], target)
+        if target_key not in cache_rows or (
+            "seat_updated_at" not in updates.get(target_key, {})
+        ):
+            with self._lock:
+                self._seat_throughput_events.append((time.time(), "viewed_unverified", 0))
+                self._last_refresh_duration_seconds = time.monotonic() - started
+            # A modal failure may have invalidated opaque PeopleSoft POST state.
+            # Do not retry another expensive path against that state immediately.
+            self._worker_context_affinity = None
+            LOGGER.warning(
+                "seat_viewed_class_refresh_unverified course=%s class=%s",
+                ", ".join(source.course_codes[:3]), target,
+            )
+            return "unverified"
+
+        self.repository.apply_seat_updates(updates)
+        completed = time.time()
+        with self._lock:
+            self._records.update(cache_rows)
+            self._update_freshness_index_locked(cache_rows)
+            self._last_success_at = completed
+            self._last_error = None
+            self._last_sections_updated = len(cache_rows)
+            self._last_refresh_duration_seconds = time.monotonic() - started
+            self._record_duration_locked(self._last_refresh_duration_seconds)
+            self._seat_throughput_events.append(
+                (completed, "viewed_verified", len(cache_rows))
+            )
+            self._dirty = True
+        LOGGER.warning(
+            "seat_viewed_class_refresh_verified course=%s class=%s term_code=%s "
+            "duration_seconds=%.2f",
+            ", ".join(source.course_codes[:3]), target, context[1],
+            time.monotonic() - started,
+        )
+        return "verified"
 
     def _recover_explicit_empty_grid(
         self, client: SdsuPeopleSoftSession, source_url: str, source: SeatSource,
@@ -2484,11 +2630,14 @@ class SeatRefreshService:
         page_seconds = [
             seconds for _, stage, seconds in self._seat_stage_durations if stage == "page"
         ]
+        viewed_seconds = [
+            seconds for _, stage, seconds in self._seat_stage_durations if stage == "viewed_worker"
+        ]
         # Bounded in-memory stage samples; no URLs or student identifiers.
         phase_names = (
             "direct", "session_reset", "bootstrap", "retry",
             "subject_recovery", "detail_recovery", "empty_subject",
-            "empty_detail", "linked_modals",
+            "empty_detail", "linked_modals", "viewed_modal",
         )
         phase_summary = {}
         for phase in phase_names:
@@ -2516,6 +2665,12 @@ class SeatRefreshService:
             "linked_modal_deferred_last_300s": sum(
                 kind == "linked_modal_deferred" for _, kind, _ in self._seat_throughput_events
             ),
+            "viewed_class_verified_last_300s": sum(
+                kind == "viewed_verified" for _, kind, _ in self._seat_throughput_events
+            ),
+            "viewed_class_unverified_last_300s": sum(
+                kind == "viewed_unverified" for _, kind, _ in self._seat_throughput_events
+            ),
             "worker_stage_timing_last_300s": {
                 "window_seconds": 300,
                 "context_attempts": len(context_seconds),
@@ -2526,6 +2681,8 @@ class SeatRefreshService:
                 ),
                 "context_max_seconds": (round(max(context_seconds), 3) if context_seconds else None),
                 "course_page_attempts": len(page_seconds),
+                "viewed_class_attempts": len(viewed_seconds),
+                "viewed_class_seconds": round(sum(viewed_seconds), 3),
                 "course_page_seconds": round(sum(page_seconds), 3),
                 "course_page_avg_seconds": (
                     round(sum(page_seconds) / len(page_seconds), 3)
@@ -2535,9 +2692,13 @@ class SeatRefreshService:
             },
             "window_seconds": 60,
             "successful_course_pages_last_60s": sum(kind == "success" for _, kind, _ in recent),
+            "verified_viewed_classes_last_60s": sum(
+                kind == "viewed_verified" for _, kind, _ in recent
+            ),
             "failed_course_pages_last_60s": sum(kind == "failure" for _, kind, _ in recent),
             "section_updates_last_60s": sum(
-                count for _, kind, count in recent if kind == "success"
+                count for _, kind, count in recent
+                if kind in {"success", "viewed_verified"}
             ),
             "subject_context_rehydrates_last_60s": sum(kind == "context" for _, kind, _ in recent),
             "affinity_reorders_last_60s": sum(kind == "batch" for _, kind, _ in recent),
